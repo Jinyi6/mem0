@@ -4,6 +4,8 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import json
+import logging
 
 from dotenv import load_dotenv
 from jinja2 import Template
@@ -110,16 +112,28 @@ class MemorySearch:
         search_1_memory = [f"{item['timestamp']}: {item['memory']}" for item in speaker_1_memories]
         search_2_memory = [f"{item['timestamp']}: {item['memory']}" for item in speaker_2_memories]
 
+        prompt_components = {
+            "speaker_1_user_id": speaker_1_user_id.split("_")[0],
+            "speaker_2_user_id": speaker_2_user_id.split("_")[0],
+            "question": question,
+            "speaker_1_memories": search_1_memory,
+            "speaker_2_memories": search_2_memory,
+            "speaker_1_graph_memories": speaker_1_graph_memories,
+            "speaker_2_graph_memories": speaker_2_graph_memories,
+        }
+        
         template = Template(self.ANSWER_PROMPT)
         answer_prompt = template.render(
-            speaker_1_user_id=speaker_1_user_id.split("_")[0],
-            speaker_2_user_id=speaker_2_user_id.split("_")[0],
-            speaker_1_memories=json.dumps(search_1_memory, indent=4),
-            speaker_2_memories=json.dumps(search_2_memory, indent=4),
-            speaker_1_graph_memories=json.dumps(speaker_1_graph_memories, indent=4),
-            speaker_2_graph_memories=json.dumps(speaker_2_graph_memories, indent=4),
-            question=question,
+            speaker_1_user_id=prompt_components["speaker_1_user_id"],
+            speaker_2_user_id=prompt_components["speaker_2_user_id"],
+            question=prompt_components["question"],
+            speaker_1_memories=json.dumps(prompt_components["speaker_1_memories"], indent=4),
+            speaker_2_memories=json.dumps(prompt_components["speaker_2_memories"], indent=4),
+            speaker_1_graph_memories=json.dumps(prompt_components["speaker_1_graph_memories"], indent=4),
+            speaker_2_graph_memories=json.dumps(prompt_components["speaker_2_graph_memories"], indent=4),
         )
+        response_content = None
+
         for attempt in range(max_retries):
             try:
                 t1 = time.time()
@@ -128,6 +142,8 @@ class MemorySearch:
                 )
                 t2 = time.time()
                 response_time = t2 - t1
+                response_content = response.choices[0].message.content
+                logging.info(f"\n--- OUTPUT (Success) ---\n{response_content}\n{'='*40}\n")
                 break
             except Exception as e:
                 pbar.write(f"\n--- ⚠️ LLM API call failed (Attempt {attempt + 1}/{max_retries}). Retrying... Error: {e} ---\n")
@@ -135,8 +151,22 @@ class MemorySearch:
                     time.sleep(random.randint(15, 45))
                 else:
                     pbar.write(f"\n--- ❌ [FINAL] LLM call failed permanently for question: '{question[:50]}...' ---\n")
+        log_input_message = (
+            f"\n{'='*40}\n[LLM Call 3/3]: Question Answering (RAG)\n{'='*40}\n"
+            f"Attempt: {attempt + 1}/{max_retries}\n"
+            f"--- INPUT COMPONENTS ---\n"
+            f"Question: {prompt_components['question']}\n\n"
+            f"Speaker 1 ({prompt_components['speaker_1_user_id']}) Memories:\n"
+            f"{json.dumps(prompt_components['speaker_1_memories'], indent=2)}\n\n"
+            f"Speaker 2 ({prompt_components['speaker_2_user_id']}) Memories:\n"
+            f"{json.dumps(prompt_components['speaker_2_memories'], indent=2)}\n"
+            f"------------------------\n"
+            f"answer_prompt:\n{answer_prompt}\n"
+            f"------------------------\n"
+        )
+        logging.info(log_input_message)
         return (
-            response.choices[0].message.content,
+            response_content,
             speaker_1_memories,
             speaker_2_memories,
             speaker_1_memory_time,

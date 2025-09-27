@@ -4,6 +4,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import json
+import logging
+
 from dotenv import load_dotenv
 from tqdm import tqdm
 from mem0 import Memory
@@ -46,53 +49,48 @@ Generate personal memories that follow these guidelines:
 5. Format each memory as a paragraph with a clear narrative structure that captures the person's experience, challenges, and aspirations
 """
 
-config = {
-    "llm": {
-        "provider": "openai",
-        "config": {
-            "model": model_name,
-            "openai_base_url": "https://api.siliconflow.cn/v1",
-            "temperature": 0.1,
-            "max_tokens": 2000,
-            # "prompts": {
-            #     "memory_creation": custom_instructions
-            # }
-        }
-    },
-    "embedder": {
-        "provider": "openai",
-        "config": {
-            "model": "BAAI/bge-m3",
-            "openai_base_url": "https://api.siliconflow.cn/v1",
-        }
-    },
-    # "vector_store": {
-    #     "provider": "qdrant",
-    #     "config": {
-    #         "collection_name": "locomo10",
-    #         "embedding_model_dims": 1024,
-    #     }
-    # },
-    "vector_store": {
-        "provider": "qdrant",
-        "config": {
-            "path": "./qdrant_data_locomo1_6",
-            "on_disk": True,
-            "embedding_model_dims":1024
-        }
-    },
-    "version": "v1.1",
-}
+
 
 import random   
 
 class MemoryADD:
-    def __init__(self, data_path=None, batch_size=6, is_graph=False):
+    def __init__(self, data_path=None, batch_size=6, is_graph=False, **kwargs):
+        config = {
+            "llm": {
+            "provider": "openai",
+            "config": {
+                "model": model_name,
+                "openai_base_url": "https://api.siliconflow.cn/v1",
+                "temperature": 0.1,
+                "max_tokens": 2000,
+                # "prompts": {
+                #     "memory_creation": custom_instructions
+                # }
+            }
+            },
+            "embedder": {
+            "provider": "openai",
+            "config": {
+                "model": kwargs.get("embedder_model", "BAAI/bge-m3"),
+                "openai_base_url": "https://api.siliconflow.cn/v1",
+            }
+            },
+            "vector_store": {
+            "provider": "qdrant",
+            "config": {
+                "path": kwargs.get("qdrant_path", "./qdrant_data/tmp"),
+                "on_disk": True,
+                "embedding_model_dims": 1024
+            }
+            },
+            "version": "v1.1",
+        }
         self.memory = Memory.from_config(config)
         self.batch_size = batch_size
         self.data_path = data_path
         self.data = None
         self.is_graph = is_graph
+        self.figure_view = kwargs.get("figure_view", False)
         if data_path:
             self.load_data()
 
@@ -148,12 +146,16 @@ class MemoryADD:
             messages = []
             messages_reverse = []
             for chat in chats:
+                context = chat['text']
+                if self.figure_view:
+                    if "img_url" in chat and "blip_caption" in chat:
+                        context += f" [Image: {chat['img_url']}] with caption: {chat['blip_caption']}"
                 if chat["speaker"] == speaker_a:
-                    messages.append({"role": "user", "content": f"{speaker_a}: {chat['text']}"})
-                    messages_reverse.append({"role": "assistant", "content": f"{speaker_a}: {chat['text']}"})
+                    messages.append({"role": "user", "content": f"{speaker_a}: {context}"})
+                    messages_reverse.append({"role": "assistant", "content": f"{speaker_a}: {context}"})
                 elif chat["speaker"] == speaker_b:
-                    messages.append({"role": "assistant", "content": f"{speaker_b}: {chat['text']}"})
-                    messages_reverse.append({"role": "user", "content": f"{speaker_b}: {chat['text']}"})
+                    messages.append({"role": "assistant", "content": f"{speaker_b}: {context}"})
+                    messages_reverse.append({"role": "user", "content": f"{speaker_b}: {context}"})
                 else:
                     raise ValueError(f"Unknown speaker: {chat['speaker']}")
 

@@ -5,6 +5,8 @@ import hashlib
 import json
 import logging
 import os
+import random
+import time
 import uuid
 import warnings
 from copy import deepcopy
@@ -351,7 +353,10 @@ class Memory(MemoryBase):
             user_prompt = f"Input:\n{parsed_messages}"
         else:
             system_prompt, user_prompt = get_fact_retrieval_messages(parsed_messages)
-
+        logger.info(f"\n{'='*40}\n[LLM Call 1/3]: Fact Extraction\n{'='*40}\n"
+                     f"--- INPUT (System Prompt) ---\n{system_prompt}\n"
+                     f"--- INPUT (User Prompt) ---\n{user_prompt}\n-----------------\n")
+        
         response = self.llm.generate_response(
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -359,6 +364,7 @@ class Memory(MemoryBase):
             ],
             response_format={"type": "json_object"},
         )
+        logger.info(f"\n--- OUTPUT ---\n{response}\n{'='*40}\n")
 
         try:
             response = remove_code_blocks(response)
@@ -400,15 +406,33 @@ class Memory(MemoryBase):
             function_calling_prompt = get_update_memory_messages(
                 retrieved_old_memory, new_retrieved_facts, self.config.custom_update_memory_prompt
             )
+            log_decision_input = (
+                f"\n{'='*40}\n[LLM Call 2/3]: Memory Decision\n{'='*40}\n"
+                f"--- INPUT COMPONENTS ---\n"
+                f"Existing Related Memories:\n{json.dumps(retrieved_old_memory, indent=2)}\n\n"
+                f"Newly Extracted Facts:\n{json.dumps(new_retrieved_facts, indent=2)}\n"
+                f"------------------------\n"
+                f"Function Calling Prompt:\n{function_calling_prompt}\n"
+            )
+            logger.info(log_decision_input)
+            try_s = 0
+            while True:
+                try:
+                    response: str = self.llm.generate_response(
+                        messages=[{"role": "user", "content": function_calling_prompt}],
+                        response_format={"type": "json_object"},
+                    )
+                    break
+                except Exception as e:
+                    if try_s < 3:
+                        try_s += 1
+                        logger.warning(f"Retrying LLM call for memory decision...{try_s}/3\t{str(e)}")
+                        time.sleep(random.randint(10, 60))  # Wait before retrying
+                        continue
+                    logger.error(f"Error in new memory actions response: {e}")
+                    response = ""
 
-            try:
-                response: str = self.llm.generate_response(
-                    messages=[{"role": "user", "content": function_calling_prompt}],
-                    response_format={"type": "json_object"},
-                )
-            except Exception as e:
-                logger.error(f"Error in new memory actions response: {e}")
-                response = ""
+            logger.info(f"\n--- OUTPUT ---\n{response}\n{'='*40}\n")
 
             try:
                 if not response or not response.strip():

@@ -8,7 +8,9 @@ from src.openai.predict import OpenAIPredict
 from src.utils import METHODS, TECHNIQUES, MODES
 # from src.zep.add import ZepAdd
 # from src.zep.search import ZepSearch
-
+import logging
+from datetime import datetime
+import sys
 
 class Experiment:
     def __init__(self, technique_type, chunk_size):
@@ -30,11 +32,53 @@ def main():
     parser.add_argument("--filter_memories", action="store_true", default=False, help="Whether to filter memories")
     parser.add_argument("--is_graph", action="store_true", default=False, help="Whether to use graph-based search")
     parser.add_argument("--num_chunks", type=int, default=1, help="Number of chunks to process")
+    parser.add_argument("--figure_view", action="store_true", default=False, help="Whether to include figure view in memory")
+    parser.add_argument("--embedder_model", type=str, default="BAAI/bge-m3", help="Embedding model name for the embedder")
+    parser.add_argument("--qdrant_path", type=str, default="./qdrant_data/tmp", help="Path for the Qdrant vector store")
+    parser.add_argument("--dataset_name", type=str, default="locomo10_failed", help="Name of the dataset")
 
     args = parser.parse_args()
 
+    # 1. Create a dynamic log file name
+    log_dir = f"logs/{args.dataset_name}"
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Include key parameters in the log file name
+    log_file_name = f"{timestamp}_{args.technique_type}_{args.method}"
+    if args.method == "search":
+        log_file_name += f"_topK{args.top_k}"
+    
+    log_file_path = os.path.join(log_dir, f"{log_file_name}.log")
+
+    # 2. Configure the logger
+    log_formatter = logging.Formatter(
+        '%(asctime)s - %(threadName)s - [%(levelname)s] - %(message)s'
+    )
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # Clear any existing handlers
+    if logger.hasHandlers():
+        logger.handlers.clear()
+        
+    # Add a file handler
+    file_handler = logging.FileHandler(log_file_path, mode='a', encoding='utf-8')
+    file_handler.setFormatter(log_formatter)
+    logger.addHandler(file_handler)
+
+    # Add a console handler
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(log_formatter)
+    logger.addHandler(stream_handler)
+
+    # 3. Print the log file path for the user to know
+    print("="*80)
+    print(f"📝 Logging all LLM interactions to: {log_file_path}")
+    print("="*80)
+
     # Add your experiment logic here
-    print(f"Running experiments with technique: {args.technique_type}, chunk size: {args.chunk_size}\n\t{args.method}, {args.mode}, top_k: {args.top_k}, filter_memories: {args.filter_memories}, is_graph: {args.is_graph}, num_chunks: {args.num_chunks}")
+    print(f"Running experiments with technique: {args.technique_type}, chunk size: {args.chunk_size}\n\t{args.method}, {args.mode}, top_k: {args.top_k}, filter_memories: {args.filter_memories}, is_graph: {args.is_graph}, num_chunks: {args.num_chunks}, figure_view: {args.figure_view}")
 
     if args.technique_type == "mem0":
         if args.mode == "client":
@@ -49,15 +93,21 @@ def main():
         else:
             raise ValueError(f"Invalid mode: {args.mode}")
         if args.method == "add":
-            memory_manager = MemoryADD(data_path="dataset/locomo1.json", is_graph=args.is_graph)
+            memory_manager = MemoryADD(
+                data_path=f"./dataset/{args.dataset_name}.json", 
+                is_graph=args.is_graph, 
+                figure_view=args.figure_view, 
+                embedder_model=args.embedder_model, 
+                qdrant_path=args.qdrant_path
+            )
             memory_manager.process_all_conversations()
         elif args.method == "search":
             output_file_path = os.path.join(
                 args.output_folder,
-                f"mem0_results_top_{args.top_k}_filter_{args.filter_memories}_graph_{args.is_graph}.json",
+                f"mem0_{args.dataset_name}_results_top_{args.top_k}_filter_{args.filter_memories}_graph_{args.is_graph}.json",
             )
             memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph)
-            memory_searcher.process_data_file("dataset/locomo1.json")
+            memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json")
     # elif args.technique_type == "rag":
     #     output_file_path = os.path.join(args.output_folder, f"rag_results_{args.chunk_size}_k{args.num_chunks}.json")
     #     rag_manager = RAGManager(data_path="dataset/locomo10_rag.json", chunk_size=args.chunk_size, k=args.num_chunks)
