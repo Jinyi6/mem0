@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import json
 import logging
+import uuid 
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -93,13 +94,16 @@ class MemoryADD:
         self.figure_view = kwargs.get("figure_view", False)
         if data_path:
             self.load_data()
+        logger = kwargs.get("logger", None)
+        self.logger = logger if logger else logging.getLogger(__name__)
 
     def load_data(self):
         with open(self.data_path, "r") as f:
             self.data = json.load(f)
         return self.data
 
-    def add_memory(self, user_id, message, metadata, retries=5):
+    def add_memory(self, user_id, message, metadata, retries=11):
+        request_id = f"add-mem-{uuid.uuid4()}"
         for attempt in range(retries):
             try:
                 _ = self.memory.add(
@@ -108,11 +112,10 @@ class MemoryADD:
                 return
             except Exception as e:
                 if attempt < retries - 1:
-                    print(f"Retrying...{attempt+1}/{retries}\t{str(e)}")
-                    time.sleep(random.randint(20, 60))  # Wait before retrying
+                    self.logger.warning(f"Request ID [{request_id}] - Retrying...{attempt+1}/{retries}\t{str(e)}")
                     continue
                 else:
-                    print("Failed to add memory after retries.", str(e))
+                    self.logger.error(f"Request ID [{request_id}] - Failed to add memory after retries.", str(e))
                     raise e
 
     def add_memories_for_speaker(self, speaker, messages, timestamp, desc, pbar=None):
@@ -177,7 +180,7 @@ class MemoryADD:
             self.add_memories_for_speaker(speaker_a_user_id, messages, timestamp, "Adding Memories for Speaker A", pbar)
             self.add_memories_for_speaker(speaker_b_user_id, messages_reverse, timestamp, "Adding Memories for Speaker B", pbar)
         
-        print("Messages added successfully")
+        self.logger.info(f"Conversation {idx} messages added successfully")
 
     # def process_all_conversations(self, max_workers=4):
     #     if not self.data:

@@ -11,7 +11,7 @@ from prompts import ANSWER_PROMPT, ANSWER_PROMPT_GRAPH
 from tqdm import tqdm
 import random 
 from mem0 import Memory
-
+import uuid
 load_dotenv()
 
 # Set the OpenAI API key
@@ -64,7 +64,8 @@ class MemorySearch:
         else:
             self.ANSWER_PROMPT = ANSWER_PROMPT
 
-    def search_memory(self, user_id, query, max_retries=5):
+    def search_memory(self, user_id, query, max_retries=11):
+        request_id = f"search-mem-{uuid.uuid4()}"
         start_time = time.time()
         retries = 0
         while retries < max_retries:
@@ -76,11 +77,11 @@ class MemorySearch:
                 )
                 break
             except Exception as e:
-                print(f"Retrying search for user {user_id}...{retries+1}/{max_retries}\tError: {str(e)}")
+                print(f"Request ID [{request_id}] - Retrying search for user {user_id}...{retries+1}/{max_retries}\tError: {str(e)}")
                 retries += 1
                 if retries >= max_retries:
                     raise e
-                time.sleep(random.randint(15, 45))
+                time.sleep(int(random.uniform(20, 40) + 15 * retries))  # Wait before retrying
 
         end_time = time.time()
 
@@ -117,7 +118,7 @@ class MemorySearch:
             speaker_2_graph_memories=json.dumps(speaker_2_graph_memories, indent=4),
             question=question,
         )
-
+        
         t1 = time.time()
         response = self.openai_client.chat.completions.create(
             model=os.getenv("MODEL"), messages=[{"role": "system", "content": answer_prompt}], temperature=0.0

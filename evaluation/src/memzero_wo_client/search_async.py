@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import json
 import logging
+import uuid
 
 from dotenv import load_dotenv
 from jinja2 import Template
@@ -53,12 +54,13 @@ config = {
 
 
 class MemorySearch:
-    def __init__(self, output_path="results.json", top_k=10, filter_memories=False, is_graph=False):
+    def __init__(self, output_path="results.json", top_k=10, filter_memories=False, is_graph=False, logger=None):
         self.memory = Memory.from_config(config)
         self.top_k = top_k
         self.openai_client = OpenAI()
         self.results = defaultdict(list)
         self.output_path = output_path
+        self.logger = logger if logger else logging.getLogger(__name__)
         self.filter_memories = filter_memories
         self.is_graph = is_graph
         self.lock = None
@@ -81,7 +83,7 @@ class MemorySearch:
                 )
                 break
             except Exception as e:
-                pbar.write(f"Retrying search for user {user_id}...{retries+1}/{max_retries}\tError: {str(e)}")
+                self.logger.warning(f"Retrying search for user {user_id}...{retries+1}/{max_retries}\tError: {str(e)}")
                 retries += 1
                 if retries >= max_retries:
                     raise e
@@ -100,8 +102,37 @@ class MemorySearch:
         graph_memories = None
 
         return semantic_memories, graph_memories, end_time - start_time
+    
+    def _log_llm_call(self, request_id, attempt, max_retries, prompt_components, full_prompt, response_content, status):
+        """
+        一个专门的方法来格式化和记录LLM的完整交互。
+        """
+        log_message = f"""
+========================= LLM Call Start =========================
+Request ID: {request_id}
+Attempt: {attempt}/{max_retries}
+Status: {status}
+--------------------------- INPUT ----------------------------
+[Question]: {prompt_components['question']}
 
-    def answer_question(self, speaker_1_user_id, speaker_2_user_id, question, answer, category, pbar=None, max_retries=5):
+[Speaker 1 ({prompt_components['speaker_1_user_id']}) Memories]:
+{json.dumps(prompt_components['speaker_1_memories'], indent=2)}
+
+[Speaker 2 ({prompt_components['speaker_2_user_id']}) Memories]:
+{json.dumps(prompt_components['speaker_2_memories'], indent=2)}
+
+[Full Prompt to LLM]:
+{full_prompt}
+--------------------------- OUTPUT ---------------------------
+{response_content if response_content else 'N/A'}
+========================== LLM Call End ==========================
+"""
+        if "Success" in status:
+            self.logger.info(log_message)
+        else:
+            self.logger.error(log_message)
+
+    def answer_question(self, speaker_1_user_id, speaker_2_user_id, question, answer, category, pbar=None, max_retries=11):
         speaker_1_memories, speaker_1_graph_memories, speaker_1_memory_time = self.search_memory(
             speaker_1_user_id, question, pbar=pbar
         )
@@ -133,7 +164,7 @@ class MemorySearch:
             speaker_2_graph_memories=json.dumps(prompt_components["speaker_2_graph_memories"], indent=4),
         )
         response_content = None
-
+        request_id = f"answer-q-{uuid.uuid4()}"
         for attempt in range(max_retries):
             try:
                 t1 = time.time()
@@ -143,28 +174,17 @@ class MemorySearch:
                 t2 = time.time()
                 response_time = t2 - t1
                 response_content = response.choices[0].message.content
-                logging.info(f"\n--- OUTPUT (Success) ---\n{response_content}\n{'='*40}\n")
-                break
+                self._log_llm_call(request_id, attempt, max_retries, prompt_components, answer_prompt, response_content, "Success")
+                break 
             except Exception as e:
-                pbar.write(f"\n--- ⚠️ LLM API call failed (Attempt {attempt + 1}/{max_retries}). Retrying... Error: {e} ---\n")
-                if attempt < max_retries - 1:
-                    time.sleep(random.randint(15, 45))
+                error_message = f"LLM API call failed. Error: {e}"
+                self._log_llm_call(request_id, attempt, max_retries, prompt_components, answer_prompt, error_message, f"Failed Attempt")
+                
+                if attempt < max_retries:
+                    time.sleep(random.randint(15, 45)+15*attempt)
                 else:
-                    pbar.write(f"\n--- ❌ [FINAL] LLM call failed permanently for question: '{question[:50]}...' ---\n")
-        log_input_message = (
-            f"\n{'='*40}\n[LLM Call 3/3]: Question Answering (RAG)\n{'='*40}\n"
-            f"Attempt: {attempt + 1}/{max_retries}\n"
-            f"--- INPUT COMPONENTS ---\n"
-            f"Question: {prompt_components['question']}\n\n"
-            f"Speaker 1 ({prompt_components['speaker_1_user_id']}) Memories:\n"
-            f"{json.dumps(prompt_components['speaker_1_memories'], indent=2)}\n\n"
-            f"Speaker 2 ({prompt_components['speaker_2_user_id']}) Memories:\n"
-            f"{json.dumps(prompt_components['speaker_2_memories'], indent=2)}\n"
-            f"------------------------\n"
-            f"answer_prompt:\n{answer_prompt}\n"
-            f"------------------------\n"
-        )
-        logging.info(log_input_message)
+                    self.logger.error(f"Request ID [{request_id}] - LLM call failed permanently after {max_retries} attempts.")
+                    
         return (
             response_content,
             speaker_1_memories,

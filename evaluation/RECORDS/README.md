@@ -2,7 +2,7 @@
 
 第一步：add
 
-```nohup python run_experiments.py --technique_type mem0 --method add --qdrant_path evaluation/qdrant_data/tmp/membench01  > logs/0927_membench_add.log 2>&1 &```
+```nohup python run_experiments.py --technique_type mem0 --method add --qdrant_path ./qdrant_data/tmp/membench01  > logs/0927_membench_add.log 2>&1 &```
 
 得到 memory
 
@@ -89,7 +89,20 @@ Prompt: 使用 get_update_memory_messages 构建的prompt。
 
 ## LLM的使用
 
-1. add.py 没有直接调用LLM。它通过调用 self.memory.add() 方法，将LLM的复杂交互委托给了 mem0 库（即 Memory.py）。LLM在这里的隐式作用是：接收原始对话文本，根据内部的prompt（比如脚本开头的 custom_instructions，虽然被注释了）智能提取和生成结构化的记忆点。
+1. 事实提取 (Fact Extraction)：
 
-2. search.py 在 answer_question 方法中，通过 openai_client 明确地调用了LLM。这里的LLM扮演的是一个阅读理解和信息整合的角色。它的任务不是从自己的知识库里回答问题，而是根据提供给它的上下文（即检索出的记忆），来综合、推理并生成问题的答案。
+位置: memory -> Memory 类 -> _add_to_vector_store 方法。
 
+目的: 从用户输入的对话内容中，提取出关键的、可作为记忆存储的事实性信息。
+
+2. 记忆决策 (Memory Decision)：
+
+位置: memory.py -> Memory 类 -> _add_to_vector_store 方法。
+
+目的: 结合上一步提取出的“新事实”和从向量数据库中检索出的“旧记忆”，让 LLM 判断应该对这些记忆执行增加（ADD）、更新（UPDATE）还是删除（DELETE）操作。
+
+3. 问答生成 (Question Answering)：
+
+位置: search.py -> MemorySearch 类 -> answer_question 方法。
+
+目的: 根据用户提问和检索到的相关记忆（上下文），调用 LLM 生成最终的回答，这是一个典型的 RAG (Retrieval-Augmented Generation) 应用。

@@ -67,11 +67,6 @@ def main():
     file_handler.setFormatter(log_formatter)
     logger.addHandler(file_handler)
 
-    # Add a console handler
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(log_formatter)
-    logger.addHandler(stream_handler)
-
     # 3. Print the log file path for the user to know
     print("="*80)
     print(f"📝 Logging all LLM interactions to: {log_file_path}")
@@ -98,7 +93,8 @@ def main():
                 is_graph=args.is_graph, 
                 figure_view=args.figure_view, 
                 embedder_model=args.embedder_model, 
-                qdrant_path=args.qdrant_path
+                qdrant_path=args.qdrant_path,
+                logger=logger 
             )
             memory_manager.process_all_conversations()
         elif args.method == "search":
@@ -106,7 +102,7 @@ def main():
                 args.output_folder,
                 f"mem0_{args.dataset_name}_results_top_{args.top_k}_filter_{args.filter_memories}_graph_{args.is_graph}.json",
             )
-            memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph)
+            memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph, logger=logger)
             memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json")
     # elif args.technique_type == "rag":
     #     output_file_path = os.path.join(args.output_folder, f"rag_results_{args.chunk_size}_k{args.num_chunks}.json")
