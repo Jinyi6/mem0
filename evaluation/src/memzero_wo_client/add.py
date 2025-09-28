@@ -223,16 +223,30 @@ class MemoryADD:
         
         print(f"--- 预计总共需要处理 {total_batches} 个批次 ---")
 
+        print("🔧 Pre-initializing vector store collection...")
+        try:
+            # 执行一个临时的、无害的操作来触发 collection 的创建
+            init_user_id = f"system_init_{uuid.uuid4()}"
+            self.memory.add("init", user_id=init_user_id)
+            self.memory.delete_all(user_id=init_user_id)
+            print("✅ Collection pre-initialization successful.")
+        except Exception as e:
+            print(f"🔥 Error during pre-initialization, this might be okay if collection already exists: {e}")
+            pass
 
         successful_count = 0
         failed_count = 0
         
         with tqdm(total=total_batches, desc="💡Total Batch Progress") as pbar:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {
-                    executor.submit(self.process_conversation, item, idx, pbar): f"Conversation {idx}" 
-                    for idx, item in enumerate(self.data)
-                }
+                # futures = {
+                #     executor.submit(self.process_conversation, item, idx, pbar): f"Conversation {idx}" 
+                #     for idx, item in enumerate(self.data)
+                # }
+                futures = {}
+                for idx, item in enumerate(self.data):
+                    futures[executor.submit(self.process_conversation, item, idx, pbar)] = f"Conversation {idx}"
+                    time.sleep(2 / (idx + 1))
 
                 for future in as_completed(futures):
                     conversation_id = futures[future]
@@ -242,5 +256,6 @@ class MemoryADD:
                     except Exception as e:
                         failed_count += 1
                         pbar.write(f"\n---[retry{failed_count}] ❌ Error processing {conversation_id}: {e} ---\n")
+                        # time.sleep(random.randint(5, 10))
 
         print(f"\n✅ All conversations processed. Success: {successful_count}, Failed: {failed_count}")
