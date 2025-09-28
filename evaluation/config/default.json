@@ -1,7 +1,7 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo1_failed"
+    "dataset_name": "locomo1_failed_half"
   },
   "exp_params": {
     "technique_type": "mem0",

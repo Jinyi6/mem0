@@ -24,38 +24,35 @@ os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
 model_name = "Qwen/Qwen3-14B"
 os.environ["MODEL"] = model_name
 
-config = {
-    "llm": {
-        "provider": "openai",
-        "config": {
-            "model": model_name,
-            "openai_base_url": "https://api.siliconflow.cn/v1",
-            "temperature": 0.1,
-            "max_tokens": 2000,
-        }
-    },
-    "embedder": {
-        "provider": "openai",
-        "config": {
-            "model": "BAAI/bge-m3",
-            "openai_base_url": "https://api.siliconflow.cn/v1",
-        }
-    },
-    "vector_store": {
-        "provider": "qdrant",
-        "config": {
-            "path": "./qdrant_data/tmp/qdrant_data_locomo1_6",
-            "on_disk": True,
-            "embedding_model_dims":1024
-        }
-    },
-    "version": "v1.1",
-}
-
-
 class MemorySearch:
-    def __init__(self, output_path="results.json", top_k=10, filter_memories=False, is_graph=False, logger=None):
-        self.memory = Memory.from_config(config)
+    def __init__(self, output_path="results.json", top_k=10, filter_memories=False, is_graph=False, logger=None, qdrant_path=None):
+        config = {
+            "llm": {
+                "provider": "openai",
+                "config": {
+                    "model": model_name,
+                    "openai_base_url": "https://api.siliconflow.cn/v1",
+                    "temperature": 0.1,
+                    "max_tokens": 2000,
+                }
+            },
+            "embedder": {
+                "provider": "openai",
+                "config": {
+                    "model": "BAAI/bge-m3",
+                    "openai_base_url": "https://api.siliconflow.cn/v1",
+                }
+            },
+            "vector_store": {
+                "provider": "qdrant",
+                "config": {
+                    "path": qdrant_path,
+                    "on_disk": True,
+                    "embedding_model_dims": 1024
+                }
+            },
+            "version": "v1.1",
+        }
         self.top_k = top_k
         self.openai_client = OpenAI()
         self.results = defaultdict(list)
@@ -64,7 +61,10 @@ class MemorySearch:
         self.filter_memories = filter_memories
         self.is_graph = is_graph
         self.lock = None
-        # self.lock = threading.Lock()
+        # Create the memory object first
+        self.memory = Memory.from_config(config)
+        # Then, set the logger attribute on the created instance
+        self.memory.logger = self.logger        # self.lock = threading.Lock()
 
         if self.is_graph:
             self.ANSWER_PROMPT = ANSWER_PROMPT_GRAPH
@@ -87,7 +87,7 @@ class MemorySearch:
                 retries += 1
                 if retries >= max_retries:
                     raise e
-                time.sleep(random.randint(15, 45))
+                time.sleep(random.randint(1, 3))
 
         end_time = time.time()
 
@@ -132,7 +132,8 @@ Status: {status}
         else:
             self.logger.error(log_message)
 
-    def answer_question(self, speaker_1_user_id, speaker_2_user_id, question, answer, category, pbar=None, max_retries=11):
+
+    def answer_question(self, speaker_1_user_id, speaker_2_user_id, question, answer, category, pbar=None, max_retries=51):
         speaker_1_memories, speaker_1_graph_memories, speaker_1_memory_time = self.search_memory(
             speaker_1_user_id, question, pbar=pbar
         )
@@ -181,7 +182,7 @@ Status: {status}
                 self._log_llm_call(request_id, attempt, max_retries, prompt_components, answer_prompt, error_message, f"Failed Attempt")
                 
                 if attempt < max_retries:
-                    time.sleep(random.randint(15, 45)+15*attempt)
+                    time.sleep(random.randint(5, 15)+5*attempt)
                 else:
                     self.logger.error(f"Request ID [{request_id}] - LLM call failed permanently after {max_retries} attempts.")
                     
@@ -194,6 +195,7 @@ Status: {status}
             speaker_1_graph_memories,
             speaker_2_graph_memories,
             response_time,
+            answer_prompt,
         )
 
     def process_question(self, val, speaker_a_user_id, speaker_b_user_id, idx, pbar=None, lock=None):
@@ -212,6 +214,7 @@ Status: {status}
             speaker_1_graph_memories,
             speaker_2_graph_memories,
             response_time,
+            answer_prompt,
         ) = self.answer_question(speaker_a_user_id, speaker_b_user_id, question, answer, category, pbar)
 
         result = {
@@ -230,6 +233,7 @@ Status: {status}
             "speaker_1_graph_memories": speaker_1_graph_memories,
             "speaker_2_graph_memories": speaker_2_graph_memories,
             "response_time": response_time,
+            "answer_prompt": answer_prompt
         }
 
 

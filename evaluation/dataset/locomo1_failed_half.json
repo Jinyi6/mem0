@@ -1,0 +1,497 @@
+[
+  {
+    "qa": [
+      {
+        "question": "When Jon has lost his job as a banker?",
+        "answer": "19 January, 2023",
+        "evidence": [
+          "D1:2"
+        ],
+        "category": 2
+      },
+      {
+        "question": "What do Jon and Gina both have in common?",
+        "answer": "They lost their jobs and decided to start their own businesses.",
+        "evidence": [
+          "D1:2",
+          "D1:3",
+          "D1:4",
+          "D2:1"
+        ],
+        "category": 1
+      },
+      {
+        "question": "Why did Jon decide to start his dance studio?",
+        "answer": "He lost his job and decided to start his own business to share his passion.",
+        "evidence": [
+          "D1:2",
+          "D1:4"
+        ],
+        "category": 4
+      },
+      {
+        "question": "Which city have both Jean and John visited?",
+        "answer": "Rome",
+        "evidence": [
+          "D2:5",
+          "D15:1"
+        ],
+        "category": 1
+      },
+      {
+        "question": "When did Gina get her tattoo?",
+        "answer": "A few years ago",
+        "evidence": [
+          "D5:15"
+        ],
+        "category": 2
+      },
+      {
+        "question": "When did Jon start expanding his studio's social media presence?",
+        "answer": "April, 2023",
+        "evidence": [
+          "D8:13"
+        ],
+        "category": 2
+      },
+      {
+        "question": "When did Gina get accepted for the design internship?",
+        "answer": "27 May, 2023",
+        "evidence": [
+          "D12:1"
+        ],
+        "category": 2
+      },
+      {
+        "question": "How did Gina promote her clothes store?",
+        "answer": "worked with an artist to make unique fashion pieces, made limited-edition sweatshirts, got some new offers and promotions for online store, developed a video presentation showing how to style her pieces",
+        "evidence": [
+          "D5:5",
+          "D16:3",
+          "D8:4",
+          "D13:4"
+        ],
+        "category": 1
+      },
+      {
+        "question": "Which events has Jon participated in to promote his business venture?",
+        "answer": "fair, networking events, dance competition",
+        "evidence": [
+          "D10:1",
+          "D16:6",
+          "D8:4"
+        ],
+        "category": 1
+      },
+      {
+        "question": "What does Jon's dance studio offer?",
+        "answer": "one-on-one metoring and training to dancers,  workshops and classes to local schools and centers",
+        "evidence": [
+          "D13:7",
+          "D8:13"
+        ],
+        "category": 1
+      },
+      {
+        "question": "Did Jon and Gina both participate in dance competitions?",
+        "answer": "Yes",
+        "evidence": [
+          "D1:14",
+          "D14:14",
+          "D1:16",
+          "D1:17",
+          "D9:10"
+        ],
+        "category": 1
+      },
+      {
+        "question": "When was Jon in Rome?",
+        "answer": "June 2023",
+        "evidence": [
+          "D15:1"
+        ],
+        "category": 2
+      },
+      {
+        "question": "Which cities has Jon visited?",
+        "answer": "Paris, Rome",
+        "evidence": [
+          "D2:4",
+          "D15:1"
+        ],
+        "category": 1
+      },
+      {
+        "question": "When did Gina mention Shia Labeouf?",
+        "answer": " 23 July, 2023",
+        "evidence": [
+          "D19:4"
+        ],
+        "category": 2
+      },
+      {
+        "question": "When did Gina go to a dance class with a group of friends?",
+        "answer": "21 July 2023",
+        "evidence": [
+          "D19:6"
+        ],
+        "category": 2
+      },
+      {
+        "question": "What was Gina's favorite dancing memory?",
+        "answer": "Winning first place at a regionals dance competition",
+        "evidence": [
+          "D1:17"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What kind of dance piece did Gina's team perform to win first place?",
+        "answer": "\"Finding Freedom\"",
+        "evidence": [
+          "D1:19"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What do the dancers in the photo represent?",
+        "answer": "They are performing at the festival",
+        "evidence": [
+          "D1:25"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What does Gina say about the dancers in the photo?",
+        "answer": "They look graceful",
+        "evidence": [
+          "D1:26"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What did Gina design for her store?",
+        "answer": "the space, furniture, and decor",
+        "evidence": [
+          "D3:4"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What did Gina want her customers to feel in her store?",
+        "answer": "cozy and comfortable",
+        "evidence": [
+          "D3:6",
+          "D3:8"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What did Jon say about Gina's progress with her store?",
+        "answer": "hard work's paying off",
+        "evidence": [
+          "D3:3"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What made Gina choose the furniture and decor for her store?",
+        "answer": "personal style and customer comfort",
+        "evidence": [
+          "D3:6"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What did Jon and Gina compare their entrepreneurial journeys to?",
+        "answer": "dancing together and supporting each other",
+        "evidence": [
+          "D6:15",
+          "D6:16"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What advice does Gina give to Jon about running a successful business?",
+        "answer": "build relationships with customers, create a strong brand image, stay positive",
+        "evidence": [
+          "D7:5"
+        ],
+        "category": 4
+      },
+      {
+        "question": "How does Gina stay confident in her business?",
+        "answer": "By reminding herself of her successes and progress, having a support system, and focusing on why she started",
+        "evidence": [
+          "D10:8"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What kind of professional experience did Gina get accepted for on May 23, 2023?",
+        "answer": "fashion internship",
+        "evidence": [
+          "D12:1"
+        ],
+        "category": 4
+      },
+      {
+        "question": "How does Jon use the clipboard with a notepad attached to it?",
+        "answer": "To set goals, track achievements, and find areas for improvement",
+        "evidence": [
+          "D13:11"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What does Jon tell Gina he won't do?",
+        "answer": "quit",
+        "evidence": [
+          "D14:17"
+        ],
+        "category": 4
+      },
+      {
+        "question": "How does Gina describe the studio that Jon has opened?",
+        "answer": "amazing",
+        "evidence": [
+          "D15:6"
+        ],
+        "category": 4
+      },
+      {
+        "question": "How does Gina describe the feeling that dance brings?",
+        "answer": "magical",
+        "evidence": [
+          "D15:8"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What does Jon plan to do at the grand opening of his dance studio?",
+        "answer": "savor all the good vibes",
+        "evidence": [
+          "D15:9"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What does Gina say to Jon about the grand opening?",
+        "answer": "Let's live it up and make some great memories",
+        "evidence": [
+          "D15:12"
+        ],
+        "category": 4
+      },
+      {
+        "question": "According to Gina, what makes Jon a perfect mentor and guide?",
+        "answer": "His positivity and determination",
+        "evidence": [
+          "D17:7"
+        ],
+        "category": 4
+      },
+      {
+        "question": "What plans does Jon have after receiving advice at the networking event?",
+        "answer": "Sprucing up his business plan, tweaking his pitch to investors, and working on an online platform.",
+        "evidence": [
+          "D18:10"
+        ],
+        "category": 4
+      }
+    ],
+    "conversation": {
+      "speaker_a": "Jon",
+      "speaker_b": "Gina",
+      "session_1_date_time": "4:04 pm on 20 January, 2023",
+      "session_1": [
+        {
+          "speaker": "Gina",
+          "dia_id": "D1:1",
+          "text": "Hey Jon! Good to see you. What's up? Anything new?"
+        },
+        {
+          "speaker": "Jon",
+          "dia_id": "D1:2",
+          "text": "Hey Gina! Good to see you too. Lost my job as a banker yesterday, so I'm gonna take a shot at starting my own business."
+        },
+        {
+          "speaker": "Gina",
+          "dia_id": "D1:3",
+          "text": "Sorry about your job Jon, but starting your own business sounds awesome! Unfortunately, I also lost my job at Door Dash this month. What business are you thinking of?"
+        },
+        {
+          "speaker": "Jon",
+          "dia_id": "D1:4",
+          "text": "Sorry to hear that! I'm starting a dance studio 'cause I'm passionate about dancing and it'd be great to share it with others."
+        },
+        {
+          "speaker": "Gina",
+          "dia_id": "D1:5",
+          "text": "That's cool, Jon! What got you into this biz?"
+        }
+      ],
+      "session_2_date_time": "2:32 pm on 29 January, 2023",
+      "session_2": [
+        {
+          "speaker": "Gina",
+          "blip_caption": "a photo of a clothing store with a variety of clothes on display",
+          "dia_id": "D2:1",
+          "re-download": true,
+          "text": "Hey Jon! Long time no see! Things have been hectic lately. I just launched an ad campaign for my clothing store in hopes of growing the business. Starting my own store and taking risks is both scary and rewarding. I'm excited to see where it takes me!"
+        },
+        {
+          "speaker": "Jon",
+          "dia_id": "D2:2",
+          "text": "Hey Gina! Whoa, your store looks great! All your hard work really paid off - congrats! Must be awesome to see your stuff on display."
+        },
+        {
+          "speaker": "Gina",
+          "dia_id": "D2:3",
+          "text": "Thanks a bunch! It's awesome seeing my vision happen. How's the dance studio going? Did you find the right spot?"
+        },
+        {
+          "speaker": "Jon",
+          "img_url": [
+            "https://avvay-aws-production.imgix.net/space-media/space-media-422692-prod.jpg"
+          ],
+          "blip_caption": "a photo of a bathroom with a blue floor and a pink wall",
+          "query": "dance studio natural lighting spacious room large windows dance mirrors",
+          "dia_id": "D2:4",
+          "text": "Hey Gina! Thanks for asking. I'm on the hunt for the ideal spot for my dance studio and it's been quite a journey! I've been looking at different places and picturing how the space would look. I even found a place with great natural light! Oh, I've been to Paris yesterday! It was sooo cool."
+        },
+        {
+          "speaker": "Gina",
+          "dia_id": "D2:5",
+          "text": "Wow, nice spot! Where is it? Got any other features you want to think about before you decide? Paris?! That is really great Jon! Never had a chance to visit it. Been only to Rome once."
+        },
+        {
+          "speaker": "Jon",
+          "dia_id": "D2:6",
+          "text": "It's downtown which is awesome cuz it's easy to get to. Plus the natural light! Gotta check the size & floor quality too. We need a good dance floor with enough bounce for me & my students to dance safely."
+        },
+        {
+          "speaker": "Gina",
+          "dia_id": "D2:7",
+          "text": "Definitely! Dance floors help avoid injuries and make dancing more enjoyable. You thinking about it is great. Any particular type of flooring you like?"
+        },
+        {
+          "speaker": "Jon",
+          "dia_id": "D2:8",
+          "text": "Yeah, good flooring's crucial. I'm after Marley flooring, which is what dance studios usually use. It's great 'cause it's grippy but still lets you move, plus it's tough and easy to keep clean."
+        }
+      ]
+    },
+    "event_summary": {
+      "events_session_1": {
+        "Jon": [
+          "Jon loses his job as a banker.",
+          "Jon begins planning for his own business venture."
+        ],
+        "Gina": [
+          "Gina loses her job at Door Dash."
+        ],
+        "date": "20 January, 2023"
+      },
+      "events_session_2": {
+        "Jon": [
+          "Jon returns from a trip to Paris."
+        ],
+        "Gina": [
+          "Gina orders advertising to promote her store."
+        ],
+        "date": "29 January, 2023"
+      }
+    },
+    "observation": {
+      "session_1_observation": {
+        "Gina": [
+          [
+            "Gina lost her job at Door Dash during the month of the conversation.",
+            "D1:3"
+          ],
+          [
+            "Gina used to compete in dance competitions and shows, winning first place in a regional competition at the age of fifteen.",
+            "D1:17"
+          ],
+          [
+            "Gina's favorite dance style is contemporary.",
+            "D1:9"
+          ]
+        ],
+        "Jon": [
+          [
+            "Jon lost his job as a banker the day before the conversation.",
+            "D1:2"
+          ],
+          [
+            "Jon is starting his own dance studio due to his passion for dancing.",
+            "D1:4"
+          ],
+          [
+            "Jon's favorite dance style is contemporary.",
+            "D1:8"
+          ],
+          [
+            "Jon practices various dances with a small group, including contemporary and hip-hop, and is working on choreography for a nearby festival.",
+            "D1:24"
+          ]
+        ]
+      },
+      "session_2_observation": {
+        "Gina": [
+          [
+            "Gina launched an ad campaign for her clothing store in hopes of growing the business.",
+            "D2:1"
+          ],
+          [
+            "Gina started her own clothing store and finds taking risks scary but rewarding.",
+            "D2:1"
+          ],
+          [
+            "Gina appreciates seeing her vision for the store come to life.",
+            "D2:3"
+          ],
+          [
+            "Gina has been to Rome once.",
+            "D2:5"
+          ],
+          [
+            "Gina believes that good flooring helps avoid injuries and makes dancing more enjoyable.",
+            "D2:7"
+          ],
+          [
+            "Gina appreciates Jon's determination to make his dance studio work.",
+            "D2:11"
+          ]
+        ],
+        "Jon": [
+          [
+            "Jon is looking for the ideal spot for his dance studio and is considering features like size, natural light, and flooring.",
+            "D2:4"
+          ],
+          [
+            "Jon visited Paris recently",
+            "D2:4"
+          ],
+          [
+            "Jon is looking for Marley flooring for his dance studio due to its grip, movement, durability, and cleanliness.",
+            "D2:8"
+          ],
+          [
+            "Jon finds the process of setting up his dance studio a mix of exciting and nerve-wracking but is determined to make it work.",
+            "D2:10"
+          ],
+          [
+            "Jon believes in himself and is grateful for Gina's support.",
+            "D2:12"
+          ]
+        ]
+      }
+    },
+    "session_summary": {
+      "session_1_summary": "Gina and Jon met at 4:04 pm on 20 January, 2023. Jon lost his job as a banker and planned to start a dance studio because of his passion for dancing. Gina also lost her job at Door Dash. They both shared a love for dance, with Jon's favorite style being contemporary. They planned to attend a dance class together. Jon showed Gina a photo of his dance crew winning a competition. Gina revealed her experience of winning first place with a contemporary piece in a dance competition. Jon mentioned rehearsing with a group for various dance styles and upcoming projects, including a performance at a festival. Gina complimented the group's grace and expressed excitement for their festival performance. They both shared enthusiasm for the upcoming events.",
+      "session_2_summary": "Gina and Jon had a conversation at 2:32 pm on 29 January, 2023. Gina mentioned launching an ad campaign for her clothing store, excited about the risks and rewards of her business. Jon complimented her hard work and discussed his search for a suitable location for his dance studio, mentioning finding a spot with great natural light. They discussed the importance of features like flooring for dance studios, with Jon preferring Marley flooring. Gina encouraged Jon to believe in himself and take breaks when needed. They both expressed determination to chase their dreams and achieve success."},
+    "sample_id": "conv-30"
+  }
+]

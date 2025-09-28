@@ -36,20 +36,21 @@ def main():
     parser.add_argument("--embedder_model", type=str, default="BAAI/bge-m3", help="Embedding model name for the embedder")
     parser.add_argument("--qdrant_path", type=str, default="./qdrant_data/tmp", help="Path for the Qdrant vector store")
     parser.add_argument("--dataset_name", type=str, default="locomo10_failed", help="Name of the dataset")
+    parser.add_argument("--workspace_dir", type=str, default=".", help="Directory for all experiment outputs including logs.")
 
     args = parser.parse_args()
 
     # 1. Create a dynamic log file name
-    log_dir = f"logs/{args.dataset_name}"
-    os.makedirs(log_dir, exist_ok=True)
+    # log_dir = f"logs/{args.dataset_name}"
+    # os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     # Include key parameters in the log file name
     log_file_name = f"{timestamp}_{args.technique_type}_{args.method}"
     if args.method == "search":
         log_file_name += f"_topK{args.top_k}"
-    
-    log_file_path = os.path.join(log_dir, f"{log_file_name}.log")
+
+    log_file_path = os.path.join(args.workspace_dir, f"{log_file_name}.log")
 
     # 2. Configure the logger
     log_formatter = logging.Formatter(
@@ -91,10 +92,10 @@ def main():
             memory_manager = MemoryADD(
                 data_path=f"./dataset/{args.dataset_name}.json", 
                 is_graph=args.is_graph, 
+                logger=logger,
                 figure_view=args.figure_view, 
                 embedder_model=args.embedder_model, 
                 qdrant_path=args.qdrant_path,
-                logger=logger 
             )
             memory_manager.process_all_conversations()
         elif args.method == "search":
@@ -102,7 +103,7 @@ def main():
                 args.output_folder,
                 f"mem0_{args.dataset_name}_results_top_{args.top_k}_filter_{args.filter_memories}_graph_{args.is_graph}.json",
             )
-            memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph, logger=logger)
+            memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph, logger=logger, qdrant_path=args.qdrant_path,)
             memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json")
     # elif args.technique_type == "rag":
     #     output_file_path = os.path.join(args.output_folder, f"rag_results_{args.chunk_size}_k{args.num_chunks}.json")

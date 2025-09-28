@@ -39,6 +39,8 @@ evaluation/dataset/Membench/Categorical data
 evaluation/dataset/Membench/data
 evaluation/dataset/Membench/data2test_default
 evaluation/evaluation/qdrant_data/tmp/
+evaluation/exp_data
+!evaluation/exp_data/Memory
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

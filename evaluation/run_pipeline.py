@@ -78,6 +78,7 @@ def main():
         "--mode", exp_params['mode'],
         "--embedder_model", exp_params['embedder_model'],
         "--qdrant_path", qdrant_path,
+        "--workspace_dir", workspace_dir, 
     ]
     if exp_params.get("figure_view", False):
         add_command.append("--figure_view")
@@ -99,6 +100,7 @@ def main():
         "--top_k", str(exp_params['top_k']),
         "--embedder_model", exp_params['embedder_model'],
         "--qdrant_path", qdrant_path,
+        "--workspace_dir", workspace_dir, 
     ]
     if exp_params.get("filter_memories", False):
         search_command.append("--filter_memories")

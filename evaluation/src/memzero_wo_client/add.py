@@ -10,6 +10,18 @@ import uuid
 
 from dotenv import load_dotenv
 from tqdm import tqdm
+LOCAL_MEM0_PATH = "/Users/jinyi/Documents/code/memory/mem0" # ATTENTION: Change this to your local mem0 path
+
+if not os.path.exists(LOCAL_MEM0_PATH):
+    raise ImportError(f"指定的本地 mem0 路径不存在: {LOCAL_MEM0_PATH}")
+
+import sys
+if LOCAL_MEM0_PATH not in sys.path:
+    sys.path.insert(0, LOCAL_MEM0_PATH)
+
+print("="*80)
+print(f"✅ 成功将本地 mem0 库路径添加到环境中: {LOCAL_MEM0_PATH}")
+print("="*80)
 from mem0 import Memory
 import math
 load_dotenv()
@@ -55,7 +67,7 @@ Generate personal memories that follow these guidelines:
 import random   
 
 class MemoryADD:
-    def __init__(self, data_path=None, batch_size=6, is_graph=False, **kwargs):
+    def __init__(self, data_path=None, batch_size=6, is_graph=False, logger=None, **kwargs):
         config = {
             "llm": {
             "provider": "openai",
@@ -86,7 +98,6 @@ class MemoryADD:
             },
             "version": "v1.1",
         }
-        self.memory = Memory.from_config(config)
         self.batch_size = batch_size
         self.data_path = data_path
         self.data = None
@@ -94,8 +105,11 @@ class MemoryADD:
         self.figure_view = kwargs.get("figure_view", False)
         if data_path:
             self.load_data()
-        logger = kwargs.get("logger", None)
+        # Create the memory object first
         self.logger = logger if logger else logging.getLogger(__name__)
+        self.memory = Memory.from_config(config)
+        # Then, set the logger attribute on the created instance
+        self.memory.logger = self.logger
 
     def load_data(self):
         with open(self.data_path, "r") as f:

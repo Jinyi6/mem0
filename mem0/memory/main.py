@@ -195,6 +195,7 @@ class Memory(MemoryBase):
         except ValidationError as e:
             logging.getLogger("MemoryConfig").error(f"Configuration validation error: {e}")
             raise
+
     def _log_llm_call(self, call_name, request_id, prompt, response, status):
         """
         Centralized method to log LLM calls for atomicity.
@@ -398,7 +399,7 @@ Status: {status}
         response = ""
         new_retrieved_facts = []
         try_s = 0
-        while try_s < 12:
+        while try_s < 52:
             try:
                 response = self.llm.generate_response(
                     messages=[
@@ -414,11 +415,11 @@ Status: {status}
             except Exception as e:
                 try_s += 1
                 self._log_llm_call("Fact Extraction", request_id_1, fact_extraction_prompt, str(e), f"Failed on attempt {try_s}")
-                if try_s >= 12:
-                    self.logger.error(f"LLM call for fact extraction failed after 12 retries.", exc_info=e)
+                if try_s >= 52:
+                    self.logger.error(f"LLM call for fact extraction failed after 52 retries.", exc_info=e)
                     new_retrieved_facts = [] # Ensure it's empty on final failure
                 else:
-                    time.sleep(random.randint(10, 60)+15*try_s)
+                    time.sleep(random.randint(5, 10)+5*try_s)
 
         if not new_retrieved_facts:
             self.logger.debug("No new facts retrieved from input. Skipping memory update LLM call.")
@@ -458,7 +459,7 @@ Status: {status}
             request_id_2 = f"memory-decision-{uuid.uuid4()}"
             response = ""
             try_s = 0
-            while try_s < 13:
+            while try_s < 53:
                 try:
                     response = self.llm.generate_response(
                         messages=[{"role": "user", "content": function_calling_prompt}],
@@ -469,13 +470,13 @@ Status: {status}
                 except Exception as e:
                     try_s += 1
                     self._log_llm_call("Memory Decision", request_id_2, function_calling_prompt, str(e), f"Failed on attempt {try_s}")
-                    if try_s >= 13:
-                        self.logger.error(f"LLM call for memory decision failed after 13 retries.", exc_info=e)
+                    if try_s >= 53:
+                        self.logger.error(f"LLM call for memory decision failed after 53 retries.", exc_info=e)
                         response = ""
                     else:
-                        time.sleep(random.randint(10, 60)+15*try_s)
+                        time.sleep(random.randint(5, 10)+5*try_s)
 
-            self.logger.info(f"\n--- OUTPUT ---\n{response}\n{'='*40}\n")
+            # self.logger.info(f"\n--- OUTPUT ---\n{response}\n{'='*40}\n")
 
             try:
                 if not response or not response.strip():
