@@ -1,7 +1,10 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo1_failed_half"
+    "dataset_name": "locomo1_failed_half",
+    "existing_workspace_dir": "./exp_data/locomo10_failed/locomo10_failed_top_k_100_filter_False_graph_False_20250928_224809",
+    "existing_workspace_dir_example": "exp_data/locomo1_failed_half/workspace"
+
   },
   "exp_params": {
     "technique_type": "mem0",

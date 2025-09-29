@@ -83,7 +83,7 @@ def evaluate_llm_judge(question, gold_answer, generated_answer):
             if retries >= max_retries:
                 print("Failed after max retries, for question:", question)
                 return 0
-            time.sleep(random.randint(20, 40))
+            time.sleep(random.randint(20, 30))
 
     return 1 if label == "CORRECT" else 0
 
