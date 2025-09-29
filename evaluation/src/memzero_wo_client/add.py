@@ -10,7 +10,11 @@ import uuid
 
 from dotenv import load_dotenv
 from tqdm import tqdm
-LOCAL_MEM0_PATH = "/Users/jinyi/Documents/code/memory/mem0" # ATTENTION: Change this to your local mem0 path
+load_dotenv()  # Load environment variables from .env file
+LOCAL_MEM0_PATH = os.getenv("LOCAL_MEM0_PATH")
+if not LOCAL_MEM0_PATH:
+    raise ValueError("环境变量 LOCAL_MEM0_PATH 未设置，请在 .env 文件中配置。")
+# LOCAL_MEM0_PATH = "/Users/jinyi/Documents/code/memory/mem0" # ATTENTION: Change this to your local mem0 path
 
 if not os.path.exists(LOCAL_MEM0_PATH):
     raise ImportError(f"指定的本地 mem0 路径不存在: {LOCAL_MEM0_PATH}")
@@ -26,10 +30,7 @@ from mem0 import Memory
 import math
 load_dotenv()
 
-# Set the OpenAI API key
-os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
-os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
-model_name = "Qwen/Qwen3-14B"
+model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
 
 
 
@@ -73,7 +74,7 @@ class MemoryADD:
             "provider": "openai",
             "config": {
                 "model": model_name,
-                "openai_base_url": "https://api.siliconflow.cn/v1",
+                "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
                 "temperature": 0.1,
                 "max_tokens": 2000,
                 # "prompts": {
@@ -85,7 +86,7 @@ class MemoryADD:
             "provider": "openai",
             "config": {
                 "model": kwargs.get("embedder_model", "BAAI/bge-m3"),
-                "openai_base_url": "https://api.siliconflow.cn/v1",
+                "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
             }
             },
             "vector_store": {
@@ -116,7 +117,7 @@ class MemoryADD:
             self.data = json.load(f)
         return self.data
 
-    def add_memory(self, user_id, message, metadata, retries=11):
+    def add_memory(self, user_id, message, metadata, retries=2):
         request_id = f"add-mem-{uuid.uuid4()}"
         for attempt in range(retries):
             try:

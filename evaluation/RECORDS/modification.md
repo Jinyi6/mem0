@@ -55,3 +55,40 @@ nohup python run_experiments.py --technique_type mem0 --method search > logs/092
 合并后的相关统计量：```evaluation/dataset/Membench/readme.md```
 
 # 5. LLM输出等log重构
+
+# 6. 竞态
+ Collection mem0 not found 的错误。
+
+这是一个非常典型的并发问题，通常被称为**“竞态条件”（Race Condition）**。当多个线程（您的代码中是 ThreadPoolExecutor 创建的多个工作线程）同时尝试初始化或修改同一个共享资源时，就会发生这种情况。
+
+问题根源：多线程同时“建房子”
+我们可以把 Qdrant 向量数据库里的 Collection 理解为一张数据表，或者一个“房子”。您的代码流程是这样的：
+
+启动多位工人：ThreadPoolExecutor 就像一个包工头，同时派出了多个工人（线程）去处理不同的 Conversation。
+
+工人们接到指令：每个工人的任务是 process_conversation。在这个任务里，第一步是 self.memory.delete_all()，然后是 self.add_memory()。
+
+混乱的施工现场：
+
+mem0 库在第一次被使用时，会检查指定的路径下（qdrant_path）有没有一个叫做 mem0 的“房子”（Collection）。
+
+因为是并行处理，所有工人几乎在同一时刻到达施工现场，都发现：“咦，这里没有叫 mem0 的房子！”
+
+于是，所有工人都试图同时开始打地基、建房子（创建 Collection）。
+
+Qdrant 的本地文件存储系统（on-disk storage）在这种情况下会陷入混乱。第一个工人可能成功创建了文件并锁定了它，其他工人此时再尝试创建就会失败，因为文件已经被占用了。或者，多个线程同时操作文件系统导致了数据不一致。
+
+那些建房子失败的工人，接下来执行 add_memory() 往房子里放家具时，自然就报错了：“你要我找的 mem0 房子根本不存在啊！” (Collection mem0 not found)。
+
+delete_all 操作也存在同样的问题，多个线程同时删除和重建，极易导致文件系统状态不一致。
+
+解决方案：先建好房子，再让工人们进场
+解决这个问题的核心思想是：将一次性的初始化工作，从并发任务中剥离出来，在主线程中预先完成。
+
+我们需要在 add.py 的 process_all_conversations 方法中，进入 ThreadPoolExecutor 之前，确保 mem0 这个 Collection 已经被创建好。
+
+文件: src/memzero_wo_client/add.py
+
+修改建议：
+
+在 process_all_conversations 方法中，with ThreadPoolExecutor(...) 语句块 之前，添加一步“预初始化”操作。最简单的方法就是执行一次无害的 add 操作，并立即删除，以此来强制 mem0 库完成 Collection 的创建。

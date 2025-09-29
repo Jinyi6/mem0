@@ -1,0 +1,464 @@
+{
+    "4": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:02' Tuesday Choices: A: Happiness, B: Anger, C: Sadness, D: Disgust. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "B",
+            "response": "\n\nA",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "1": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:00' Tuesday Choices: A: Sadness, B: Fear, C: Surprise, D: Disgust. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "C",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "11": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:07' Tuesday Choices: A: Sadness, B: Surprise, C: Anger, D: Disgust. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "\n\nA",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "7": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:00' Tuesday Choices: A: Anger, B: Fear, C: Disgust, D: Surprise. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "\n\nA",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "8": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:00' Tuesday Choices: A: Anger, B: Sadness, C: Happiness, D: Surprise. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "\n\nD",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "2": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:00' Tuesday Choices: A: Fear, B: Surprise, C: Happiness, D: Sadness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "\n\nD",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "14": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:00' Tuesday Choices: A: Anger, B: Fear, C: Happiness, D: Sadness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "B",
+            "response": "C",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "0": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:05' Tuesday Choices: A: Anger, B: Fear, C: Happiness, D: Disgust. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "\n\nA",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "10": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:06' Tuesday Choices: A: Anger, B: Fear, C: Surprise, D: Sadness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "B",
+            "response": "\n\nA",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "15": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:04' Tuesday Choices: A: Fear, B: Happiness, C: Disgust, D: Surprise. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "B",
+            "response": "\n\nD",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "16": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:10' Tuesday Choices: A: Happiness, B: Sadness, C: Disgust, D: Anger. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nB",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "9": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:10' Tuesday Choices: A: Surprise, B: Sadness, C: Happiness, D: Disgust. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "\n\nC",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "21": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:06' Tuesday Choices: A: Happiness, B: Surprise, C: Sadness, D: Disgust. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "\n\nA",
+            "category": "Emotion",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "19": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:00' Tuesday Choices: A: Surprise, B: Happiness, C: Fear, D: Sadness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "\n\nA",
+            "category": "Emotion",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "23": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:04' Tuesday Choices: A: Disgust, B: Surprise, C: Happiness, D: Sadness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "\n\nD",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 1
+        }
+    ],
+    "18": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:00' Tuesday Choices: A: Fear, B: Disgust, C: Sadness, D: Happiness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "\n\nA",
+            "category": "Emotion",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "12": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:04' Tuesday Choices: A: Fear, B: Happiness, C: Surprise, D: Sadness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nD",
+            "category": "Emotion",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "20": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:04' Tuesday Choices: A: Surprise, B: Disgust, C: Anger, D: Happiness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nC",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "28": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the name of my female cousin? Choices: A: Leah Whitmore, B: Lena Whitmore, C: Lena Whitecomb, D: Lina Whitmore. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "B",
+            "response": "\n\nC",
+            "category": "knowledge_updating",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "22": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:05' Tuesday Choices: A: Disgust, B: Sadness, C: Anger, D: Happiness. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nD",
+            "category": "Emotion",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "17": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:04' Tuesday Choices: A: Anger, B: Sadness, C: Surprise, D: Fear. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "C",
+            "category": "Emotion",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "24": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the most likely user sentiment around '2024-10-01 08:06' Tuesday Choices: A: Disgust, B: Sadness, C: Anger, D: Surprise. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nD",
+            "category": "Emotion",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "31": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the birthday of my father? Choices: A: 05/05, B: 04/05, C: 05/06, D: 05/04. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "\n\nA",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "33": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the hometown of the subordinate? Choices: A: Los Angles, CA, B: Los Angeles, CA, C: San Francisco, CA, D: San Diego, CA. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "B",
+            "response": "\n\nB",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "27": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the hometown of my father? Choices: A: Washington, DE, B: Washington, MD, C: Washington, VA, D: Washington, DC. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nD",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "30": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the work location of my female cousin? Choices: A: San Francisco, CA, B: Las Vegas, NM, C: Las Vegas, NV, D: Los Angeles, CA. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "C",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "32": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the name of my brother's company? Choices: A: Harmony Healthcare Network, B: Harmony Wellness Group, C: Harmony Health Solutions, D: Harmony Health Group. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "B",
+            "category": "knowledge_updating",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "25": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: Which of the following descriptions fits the workplace of someone named Jaxon Rivera?In addition, What is the most likely description for my Own's Dishwasher? Choices: A: Known for its architecture, museums, and deep-dish pizza.; As a Senior Financial Advisor at Pinnacle Wealth Management Group, I often reflect on the value and efficiency of the tools we use in our daily lives. The Revlon One-Step Hair Dryer has proven to be a standout addition to my grooming routine, harmonizing well with my busy lifestyle.\n\nFirst and foremost, its design combines the functionality of a hair dryer and a styling brush, making it a time-saving marvel. The heated bristles allow for drying and styling in a single step, which is particularly advantageous when traveling or managing a packed schedule. This efficiency resonates well with my profession, where maximizing time is crucial.\n\nIn terms of performance, I appreciate the even heat distribution that helps minimize frizz and achieve a smooth finish. This quality is essential for someone like me, who values a polished appearance without investing too much time in styling. The lightweight nature of the dryer also makes it travel-friendly, fitting seamlessly into my globetrotting adventures.\n\nAdditionally, the variety of heat settings caters to different hair types and styling needs, which adds a layer of customization that I find thoughtful and user-focused. The price point is reasonable for the quality it delivers, making it a worthwhile investment for those looking for reliable and effective hair care tools.\n\nOverall, the Revlon One-Step Hair Dryer aligns perfectly with my thoughtful approach to both my personal and professional life, making it a highly recommended product for anyone looking to streamline their beauty routine., B: Known for the Golden Gate Bridge and its tech industry.; As a Senior Financial Advisor at Pinnacle Wealth Management Group, I appreciate the value of quality and durability not just in financial products but also in day-to-day items. The Le Creuset Wooden Spatula stands out with its well-crafted design and functionality. \n\n**Evaluation of Le Creuset Wooden Spatula:**\n\nThe Le Creuset Wooden Spatula exhibits exceptional craftsmanship. Its solid wood construction provides a robust feel, ensuring longevity and resilience during everyday use. The spatula\u2019s angled head is perfect for scraping pots and pans clean without scratching, which is a significant plus for both non-stick and traditional cookware. \n\nIn terms of functionality, it handles a variety of cooking tasks seamlessly, from flipping pancakes to serving polenta, making it a versatile tool in any kitchen. The natural wood finish adds an aesthetic charm, aligning beautifully with a well-appointed kitchen.\n\nFrom a thoughtful perspective, I appreciate that this spatula is not only functional but also environmentally friendly, aligning with sustainable cooking practices. The investment in this spatula is worthwhile, as it combines durability with practicality, elevating the cooking experience.\n\nOverall, the Le Creuset Wooden Spatula is a worthwhile addition to any culinary collection, merging elegance and efficiency seamlessly. It's a reminder that thoughtful choices, whether in finance or kitchen tools, lead to lasting satisfaction., C: The capital of the U.S., known for its national monuments and museums.; The Seville Classics Bamboo Cutting Board is an impressive addition to any kitchen. First off, the high-quality bamboo material is not only sustainable but also incredibly durable, which is a significant plus for daily use. I appreciate how the surface is gentle on knives, preserving the sharpness and longevity of my kitchen tools.\n\nIts design is both functional and aesthetically pleasing, fitting seamlessly into my kitchen d\u00e9cor. The size is perfect; it provides ample space for chopping, slicing, and dicing, making meal prep much more efficient. I find the integrated juice groove particularly helpful, as it minimizes mess and keeps my workspace clean during food preparation.\n\nCleaning is straightforward, and I love that it is lightweight, making it easy to move around when I need to. While bamboo requires a bit of extra care to maintain, such as avoiding soaking it in water or putting it in the dishwasher, it's a small trade-off for such a stylish and functional board.\n\nOverall, I highly recommend the Seville Classics Bamboo Cutting Board for anyone who enjoys cooking. Its thoughtful design and durability make it a worthy investment that adds both practicality and beauty to my kitchen., D: A major city in Texas, known for its energy industry and space exploration.; As a Senior Financial Advisor with a busy lifestyle, I rely heavily on the efficiency and functionality of my home appliances. The GE Profile PDT775SYNFS dishwasher has truly exceeded my expectations. Its sleek design complements my kitchen beautifully, while its robust features make cleaning up after meals a breeze. \n\nThe dishwasher operates quietly, which is perfect for my home environment, especially when I\u2019m catching up on work or having friends over. I appreciate the numerous wash cycle options, including heavy-duty and quick wash modes, allowing me to customize cycles based on my needs. Plus, the third rack is a game-changer\u2014ideal for utensils and smaller items, making the most out of every load.\n\nOne minor downside is that the delay start feature can be slightly confusing at first, but once you get the hang of it, it\u2019s quite useful. Overall, the GE Profile PDT775SYNFS is a thoughtful addition to my home, streamlining my chores and giving me more time to enjoy my passion for traveling. I highly recommend it!. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nD",
+            "category": "post_processing",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "40": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the main content of Culinary Artistry? Choices: A: Engage in a culinary expedition featuring traditional crafts from various countries, focusing solely on the art of cake decorating., B: Immerse yourself in a culinary journey where each dish resembles a finely crafted model, showcasing global cuisines. Enjoy tastings, interactive workshops, and live demonstrations, blending the artistry of food with the precision of model making for a unique experience., C: Experience a culinary class dedicated to the science of fermentation, with lectures on microbial processes and taste., D: Participate in a cooking competition where each dish must represent modern art, emphasizing visual appeal over flavor.. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "B",
+            "response": "\n\nB",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "41": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the location of FitFest Global? Choices: A: New York, NY, B: San Francisco, CA, C: Chicago, IL, D: Boston, MA. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nD",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "35": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the name of my mother's hometown? Choices: A: Indianapolis, IL, B: Indianapolis, IN, C: Indianapolis, OH, D: Indianapolis, IN. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nD",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "46": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the duration of FinStart 2024? Choices: A: four days, B: two days, C: three day, D: five days. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "C",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "34": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the height of my nephew? Choices: A: 145cm, B: 143cm, C: 148cm, D: 150cm. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "\n\nA",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "36": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: When is my brother's birthday? Choices: A: 03/18, B: 03/19, C: 02/18, D: 03/17. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "A",
+            "response": "D",
+            "category": "knowledge_updating",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "26": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the name of my mother? Choices: A: Sienna Black, B: Serena Blake, C: Sienna Blake, D: Sienna Bkake. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "\n\nC",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "38": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What does \"time\" mean in TeamForge? Choices: A: 2024-10-12 9:00, B: 2023-10-11 9:30, C: 2024-10-11 9:00, D: 2024-10-11 8:00. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "C",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "48": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the time for SoundForward? Choices: A: 2024-10-15 9:00, B: 2024-10-16 10:00, C: 2024-10-16 9:00, D: 2024-11-16 9:00. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "A",
+            "category": "knowledge_updating",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "42": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the duration of Fishing Tales? Choices: A: seven days, B: nine days, C: eight day, D: ten days. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "C",
+            "response": "A",
+            "category": "knowledge_updating",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "45": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the location of Lit Fest 2024? Choices: A: Miami, FL, B: Orlando, FL, C: Orlando, CA, D: Tampa, FL. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "B",
+            "response": "\n\nD",
+            "category": "knowledge_updating",
+            "bleu_score": 0,
+            "f1_score": 0.0,
+            "llm_score": 0
+        }
+    ],
+    "47": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the scale of Psych Trendz? Choices: A: 190 people, B: 250 people, C: 180 people, D: two hundred people. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "D",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "43": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the duration of CineMagic? Choices: A: four day, B: six days, C: three days, D: five day. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "D",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ],
+    "49": [
+        {
+            "question": "Please answer the following question based on past memories of your conversation with the user. Question: What is the scale of the Woodcraft Fest? Choices: A: eighty people, B: two hundred people, C: one hundred fifty people, D: one hundred people. Please output the correct option for the question, only one corresponding letter, without any other messages. Example: D",
+            "answer": "D",
+            "response": "\n\nD",
+            "category": "knowledge_updating",
+            "bleu_score": 1.0,
+            "f1_score": 1.0,
+            "llm_score": 1
+        }
+    ]
+}

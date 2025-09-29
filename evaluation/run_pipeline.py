@@ -7,12 +7,38 @@ import argparse
 import shutil
 from datetime import datetime
 
+
+os.environ["LOCAL_MEM0_PATH"] = "/Users/jinyi/Documents/code/memory/mem0"
+# Set the OpenAI API key
+os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
+os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
+os.environ["BASE_MODEL"] = "Qwen/Qwen3-14B"
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+# def run_command(command):
+#     """Executes a command and raises an exception if it fails."""
+#     print(f"\n🚀 Executing command:\n{' '.join(command)}\n")
+#     try:
+#         subprocess.run(command, check=True)
+#     except subprocess.CalledProcessError as e:
+#         print(f"❌ Command failed with exit code {e.returncode}")
+#         raise e
+#     except FileNotFoundError:
+#         print(f"❌ Command not found. Make sure '{command[1]}' is in the correct path.")
+#         raise
+
 def run_command(command):
-    """Executes a command and raises an exception if it fails."""
+    """Executes a command, captures its output, and raises an exception if it fails."""
     print(f"\n🚀 Executing command:\n{' '.join(command)}\n")
     try:
-        subprocess.run(command, check=True)
+        # 修改这里：添加 capture_output=True 和 text=True
+        result = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8')
     except subprocess.CalledProcessError as e:
+        # 在这里打印捕获到的标准输出和标准错误
+        print("-------------------- STDOUT --------------------")
+        print(e.stdout)
+        print("-------------------- STDERR --------------------")
+        print(e.stderr)
+        print("----------------------------------------------")
         print(f"❌ Command failed with exit code {e.returncode}")
         raise e
     except FileNotFoundError:

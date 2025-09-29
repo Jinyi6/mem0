@@ -14,10 +14,7 @@ from mem0 import Memory
 import uuid
 load_dotenv()
 
-# Set the OpenAI API key
-os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
-os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
-model_name = "Qwen/Qwen3-14B"
+model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
 os.environ["MODEL"] = model_name
 
 config = {
@@ -25,7 +22,7 @@ config = {
         "provider": "openai",
         "config": {
             "model": model_name,
-            "openai_base_url": "https://api.siliconflow.cn/v1",
+            "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
             "temperature": 0.1,
             "max_tokens": 2000,
         }
@@ -34,7 +31,7 @@ config = {
         "provider": "openai",
         "config": {
             "model": "BAAI/bge-m3",
-            "openai_base_url": "https://api.siliconflow.cn/v1",
+            "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
         }
     },
     "vector_store": {

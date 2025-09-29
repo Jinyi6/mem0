@@ -399,7 +399,11 @@ Status: {status}
         response = ""
         new_retrieved_facts = []
         try_s = 0
-        while try_s < 52:
+        # 细化重试逻辑
+        llm_error_retries = 0
+        other_error_retries = 0
+        MAX_OTHER_ERROR_RETRIES = 6
+        while True:
             try:
                 response = self.llm.generate_response(
                     messages=[
@@ -413,13 +417,49 @@ Status: {status}
                 new_retrieved_facts = json.loads(response)["facts"]
                 break # Exit loop on success
             except Exception as e:
-                try_s += 1
-                self._log_llm_call("Fact Extraction", request_id_1, fact_extraction_prompt, str(e), f"Failed on attempt {try_s}")
-                if try_s >= 52:
-                    self.logger.error(f"LLM call for fact extraction failed after 52 retries.", exc_info=e)
-                    new_retrieved_facts = [] # Ensure it's empty on final failure
+                error_str = str(e).lower()
+                if "rate limit" in error_str or "limit" in error_str or "overloaded" in error_str or "token" in error_str:
+                    # 识别为LLM相关的限流错误
+                    llm_error_retries += 1
+                    other_error_retries = 0  # 重置其他错误计数
+                    sleep_duration = random.uniform(2, 20) + 5 * llm_error_retries
+                    error_message = f"LLM Rate Limit related Error. Retrying in {sleep_duration:.2f}s... Error: {e}"
+                    
+                    self._log_llm_call(
+                        "Fact Extraction",
+                        request_id_1,
+                        fact_extraction_prompt,
+                        error_message,
+                        f"Failed Attempt (Rate Limit) - Retry {llm_error_retries}"
+                    )
+                    time.sleep(sleep_duration)
+
                 else:
-                    time.sleep(random.randint(5, 10)+5*try_s)
+                    other_error_retries += 1
+                    if other_error_retries >= MAX_OTHER_ERROR_RETRIES:
+                        self.logger.error(f"Request ID [{request_id_1}] - Exceeded max retries ({MAX_OTHER_ERROR_RETRIES}) for non-rate-limit errors. Failing permanently. Error: {e}")
+                        response_content = "Error: Default response due to unrecoverable error." # 设置默认值
+                        break  # 达到最大次数，跳出循环
+                    
+                    error_message = f"An unexpected error occurred. Retrying immediately (attempt {other_error_retries}/{MAX_OTHER_ERROR_RETRIES})... Error: {e}"
+                    
+                    self._log_llm_call(
+                        "Fact Extraction",
+                        request_id_1,
+                        fact_extraction_prompt,
+                        error_message,
+                        f"Failed Attempt (Other Error) - Retry {other_error_retries}/{MAX_OTHER_ERROR_RETRIES}"
+                    )
+                    # 对于其他错误，可以选择不休眠或短暂休眠立即重试
+                    # time.sleep(1) 
+
+                # try_s += 1
+                # self._log_llm_call("Fact Extraction", request_id_1, fact_extraction_prompt, str(e), f"Failed on attempt {try_s}")
+                # if try_s >= 52:
+                #     self.logger.error(f"LLM call for fact extraction failed after 52 retries.", exc_info=e)
+                #     new_retrieved_facts = [] # Ensure it's empty on final failure
+                # else:
+                #     time.sleep(random.randint(5, 10)+5*try_s)
 
         if not new_retrieved_facts:
             self.logger.debug("No new facts retrieved from input. Skipping memory update LLM call.")
@@ -459,7 +499,11 @@ Status: {status}
             request_id_2 = f"memory-decision-{uuid.uuid4()}"
             response = ""
             try_s = 0
-            while try_s < 53:
+            # 细化重试逻辑
+            llm_error_retries = 0
+            other_error_retries = 0
+            MAX_OTHER_ERROR_RETRIES = 6
+            while True:
                 try:
                     response = self.llm.generate_response(
                         messages=[{"role": "user", "content": function_calling_prompt}],
@@ -468,13 +512,48 @@ Status: {status}
                     self._log_llm_call("Memory Decision", request_id_2, function_calling_prompt, response, f"Success on attempt {try_s + 1}")
                     break
                 except Exception as e:
-                    try_s += 1
-                    self._log_llm_call("Memory Decision", request_id_2, function_calling_prompt, str(e), f"Failed on attempt {try_s}")
-                    if try_s >= 53:
-                        self.logger.error(f"LLM call for memory decision failed after 53 retries.", exc_info=e)
-                        response = ""
+
+                    error_str = str(e).lower()
+                    if "rate limit" in error_str or "limit" in error_str or "overloaded" in error_str or "token" in error_str:
+                        # 识别为LLM相关的限流错误
+                        llm_error_retries += 1
+                        other_error_retries = 0  # 重置其他错误计数
+                        sleep_duration = random.uniform(2, 20) + 5 * llm_error_retries
+                        error_message = f"LLM Rate Limit related Error. Retrying in {sleep_duration:.2f}s... Error: {e}"
+                        
+                        self._log_llm_call(
+                            "Memory Decision",
+                            request_id_2,
+                            function_calling_prompt,
+                            error_message,
+                            f"Failed Attempt (Rate Limit) - Retry {llm_error_retries}"
+                        )
+                        time.sleep(sleep_duration)
+
                     else:
-                        time.sleep(random.randint(5, 10)+5*try_s)
+                        other_error_retries += 1
+                        if other_error_retries >= MAX_OTHER_ERROR_RETRIES:
+                            self.logger.error(f"Request ID [{request_id_2}] - Exceeded max retries ({MAX_OTHER_ERROR_RETRIES}) for non-rate-limit errors. Failing permanently. Error: {e}")
+                            response_content = "Error: Default response due to unrecoverable error." # 设置默认值
+                            break  # 达到最大次数，跳出循环
+                        
+                        error_message = f"An unexpected error occurred. Retrying immediately (attempt {other_error_retries}/{MAX_OTHER_ERROR_RETRIES})... Error: {e}"
+                        
+                        self._log_llm_call(
+                            "Memory Decision",
+                            request_id_2,
+                            function_calling_prompt,
+                            error_message,
+                            f"Failed Attempt (Other Error) - Retry {other_error_retries}/{MAX_OTHER_ERROR_RETRIES}"
+                        )
+
+                    # try_s += 1
+                    # self._log_llm_call("Memory Decision", request_id_2, function_calling_prompt, str(e), f"Failed on attempt {try_s}")
+                    # if try_s >= 53:
+                    #     self.logger.error(f"LLM call for memory decision failed after 53 retries.", exc_info=e)
+                    #     response = ""
+                    # else:
+                    #     time.sleep(random.randint(5, 10)+5*try_s)
 
             # self.logger.info(f"\n--- OUTPUT ---\n{response}\n{'='*40}\n")
 

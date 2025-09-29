@@ -19,9 +19,8 @@ from mem0 import Memory
 load_dotenv()
 
 # Set the OpenAI API key
-os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
-os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
-model_name = "Qwen/Qwen3-14B"
+
+model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
 os.environ["MODEL"] = model_name
 
 class MemorySearch:
@@ -31,7 +30,7 @@ class MemorySearch:
                 "provider": "openai",
                 "config": {
                     "model": model_name,
-                    "openai_base_url": "https://api.siliconflow.cn/v1",
+                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
                     "temperature": 0.1,
                     "max_tokens": 2000,
                 }
@@ -40,7 +39,7 @@ class MemorySearch:
                 "provider": "openai",
                 "config": {
                     "model": "BAAI/bge-m3",
-                    "openai_base_url": "https://api.siliconflow.cn/v1",
+                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
                 }
             },
             "vector_store": {
@@ -166,7 +165,11 @@ Status: {status}
         )
         response_content = None
         request_id = f"answer-q-{uuid.uuid4()}"
-        for attempt in range(max_retries):
+        # 细化重试逻辑
+        llm_error_retries = 0
+        other_error_retries = 0
+        MAX_OTHER_ERROR_RETRIES = 6
+        while True:
             try:
                 t1 = time.time()
                 response = self.openai_client.chat.completions.create(
@@ -175,18 +178,39 @@ Status: {status}
                 t2 = time.time()
                 response_time = t2 - t1
                 response_content = response.choices[0].message.content
-                self._log_llm_call(request_id, attempt, max_retries, prompt_components, answer_prompt, response_content, "Success")
+                self._log_llm_call(request_id, llm_error_retries+other_error_retries, max_retries, prompt_components, answer_prompt, response_content, "Success")
                 break 
             except Exception as e:
-                error_message = f"LLM API call failed. Error: {e}"
-                self._log_llm_call(request_id, attempt, max_retries, prompt_components, answer_prompt, error_message, f"Failed Attempt")
-                
-                if attempt < max_retries:
-                    time.sleep(random.randint(5, 15)+5*attempt)
+                error_str = str(e).lower()
+                if "rate limit" in error_str or "limit" in error_str or "overloaded" in error_str or "token" in error_str:
+                    # 识别为LLM相关的限流错误
+                    llm_error_retries += 1
+                    other_error_retries = 0 # 重置其他错误计数
+                    sleep_duration = random.uniform(2, 20) + 5 * llm_error_retries
+                    error_message = f"LLM Rate Limit related Error. Retrying in {sleep_duration:.2f}s... Error: {e}"
+                    self._log_llm_call(request_id, llm_error_retries, max_retries, prompt_components, answer_prompt, error_message, "Failed Attempt (Rate Limit)")
+                    time.sleep(sleep_duration)
                 else:
-                    self.logger.error(f"Request ID [{request_id}] - LLM call failed permanently after {max_retries} attempts.")
+                    # 识别为其他错误
+                    other_error_retries += 1
+                    if other_error_retries >= MAX_OTHER_ERROR_RETRIES:
+                        self.logger.error(f"Request ID [{request_id}] - Exceeded max retries ({MAX_OTHER_ERROR_RETRIES}) for non-rate-limit errors. Failing permanently. Error: {e}")
+                        response_content = "Error: Default response due to unrecoverable error." # 设置默认值
+                        break # 达到最大次数，跳出循环
                     
-        return (
+                    error_message = f"An unexpected error occurred. Retrying immediately (attempt {other_error_retries}/{MAX_OTHER_ERROR_RETRIES})... Error: {e}"
+                    self._log_llm_call(request_id, other_error_retries, max_retries, prompt_components, answer_prompt, error_message, "Failed Attempt (Other Error)")
+                    self.logger.warning(error_message)
+
+                # error_message = f"LLM API call failed. Error: {e}"
+                # self._log_llm_call(request_id, attempt, max_retries, prompt_components, answer_prompt, error_message, f"Failed Attempt")
+                
+                # if attempt < max_retries:
+                #     time.sleep(random.randint(5, 15)+5*attempt)
+                # else:
+                #     self.logger.error(f"Request ID [{request_id}] - LLM call failed permanently after {max_retries} attempts.")
+                    
+        return (    
             response_content,
             speaker_1_memories,
             speaker_2_memories,

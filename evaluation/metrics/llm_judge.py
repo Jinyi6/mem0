@@ -4,11 +4,28 @@ from collections import defaultdict
 
 import numpy as np
 from openai import OpenAI
+import os
+
+
+LOCAL_MEM0_PATH = os.getenv("LOCAL_MEM0_PATH")
+if not LOCAL_MEM0_PATH:
+    raise ValueError("环境变量 LOCAL_MEM0_PATH 未设置，请在 .env 文件中配置。")
+# LOCAL_MEM0_PATH = "/Users/jinyi/Documents/code/memory/mem0" # ATTENTION: Change this to your local mem0 path
+
+if not os.path.exists(LOCAL_MEM0_PATH):
+    raise ImportError(f"指定的本地 mem0 路径不存在: {LOCAL_MEM0_PATH}")
+
+import sys
+if LOCAL_MEM0_PATH not in sys.path:
+    sys.path.insert(0, LOCAL_MEM0_PATH)
+
+print("="*80)
+print(f"✅ 成功将本地 mem0 库路径添加到环境中: {LOCAL_MEM0_PATH}")
+print("="*80)
 
 from mem0.memory.utils import extract_json
 
-client = OpenAI(api_key="sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo", 
-                base_url="https://api.siliconflow.cn/v1")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL"))
 
 
 ACCURACY_PROMPT = """
@@ -58,7 +75,7 @@ def evaluate_llm_judge(question, gold_answer, generated_answer):
                 temperature=0.0,
             )
             label = json.loads(extract_json(response.choices[0].message.content))["label"]
-            print("Done")
+            # print("Done")
             break
         except Exception as e:
             print("Retrying...", str(e))
