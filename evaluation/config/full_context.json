@@ -7,7 +7,7 @@
 
   },
   "exp_params": {
-    "technique_type": "mem0",
+    "technique_type": "full_context",
     "mode": "no_client_async",
     "top_k": 5,
     "filter_memories": false,

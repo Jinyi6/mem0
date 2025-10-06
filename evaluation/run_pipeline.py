@@ -256,7 +256,7 @@ def main():
 
     # --- Execute Pipeline Steps Conditionally ---
     
-    if args.start_from_step <= 1:
+    if args.start_from_step <= 1 and exp_params['technique_type'] not in ["full_context", "openai"]:
         print("\n" + "#"*25 + " STEP 1: ADD MEMORIES " + "#"*25)
         add_command = [
             "python", "-u", "./run_experiments.py",
@@ -273,7 +273,7 @@ def main():
         run_command(add_command)
         print("✅ Step 1 completed successfully.")
     else:
-        print("\n⏭️ Skipping Step 1: ADD MEMORIES.")
+        print("\n⏭️ Skipping Step 1: ADD MEMORIES. (Not required for '{exp_params['technique_type']}' or start_from_step > 1).")
 
     if args.start_from_step <= 2:
         print("\n" + "#"*25 + " STEP 2: SEARCH MEMORIES " + "#"*25)

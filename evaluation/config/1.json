@@ -13,7 +13,7 @@
     "filter_memories": false,
     "is_graph": false,
     "figure_view": false,
-    "embedder_model": "Pro/BAAI/bge-m3"
+    "embedder_model": "BAAI/bge-m3"
   },
   "eval_params": {
     "max_workers": 10

@@ -106,3 +106,16 @@ Prompt: 使用 get_update_memory_messages 构建的prompt。
 位置: search.py -> MemorySearch 类 -> answer_question 方法。
 
 目的: 根据用户提问和检索到的相关记忆（上下文），调用 LLM 生成最终的回答，这是一个典型的 RAG (Retrieval-Augmented Generation) 应用。
+
+# query
+
+q -> [q].  -> topk memory - >answer
+
+q -> [q, a, b, c] 
+        -> top k m (q)
+        -> top k m (a)
+        -> top k m (b)
+        -> top k m (c)
+                        -> merge  totally top k 
+                        -> merge  score均值 / 75%分位值  > theta 
+                        ....

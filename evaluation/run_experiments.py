@@ -3,6 +3,7 @@ import os
 
 # from src.langmem import LangMemManager
 
+from src.full_context import FullContextManager
 from src.openai.predict import OpenAIPredict
 # from src.rag import RAGManager
 from src.utils import METHODS, TECHNIQUES, MODES
@@ -105,6 +106,25 @@ def main():
             )
             memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph, logger=logger, qdrant_path=args.qdrant_path,)
             memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json")
+    elif args.technique_type == "full_context":
+        print("🚀 Running 'full_context' processing...")
+        output_file_path = os.path.join(
+            args.output_folder,
+            f"full_context_{args.dataset_name}_results.json"
+        )
+
+        # Instantiate and run the manager
+        full_context_manager = FullContextManager(
+            output_path=output_file_path, 
+            logger=logger
+        )
+
+        # The main processing call
+        full_context_manager.process_data_file(
+            file_path=f"./dataset/{args.dataset_name}.json",
+            # You can make max_workers an argparse parameter if needed
+            max_workers=10 
+        )
     # elif args.technique_type == "rag":
     #     output_file_path = os.path.join(args.output_folder, f"rag_results_{args.chunk_size}_k{args.num_chunks}.json")
     #     rag_manager = RAGManager(data_path="dataset/locomo10_rag.json", chunk_size=args.chunk_size, k=args.num_chunks)

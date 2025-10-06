@@ -1,7 +1,7 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo10_failed",
+    "dataset_name": "locomo5_failed",
     "existing_workspace_dir": "",
     "existing_workspace_dir_example": "./exp_data/locomo10_failed/locomo10_failed_top_k_100_filter_False_graph_False_20250928_224809"
 
@@ -12,7 +12,7 @@
     "top_k": 5,
     "filter_memories": false,
     "is_graph": false,
-    "figure_view": false,
+    "figure_view": true,
     "embedder_model": "Pro/BAAI/bge-m3"
   },
   "eval_params": {

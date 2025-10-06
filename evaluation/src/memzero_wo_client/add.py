@@ -119,19 +119,22 @@ class MemoryADD:
 
     def add_memory(self, user_id, message, metadata, retries=2):
         request_id = f"add-mem-{uuid.uuid4()}"
-        for attempt in range(retries):
-            try:
-                _ = self.memory.add(
-                    message, user_id=user_id, metadata=metadata
-                )
-                return
-            except Exception as e:
-                if attempt < retries - 1:
-                    self.logger.warning(f"Request ID [{request_id}] - Retrying...{attempt+1}/{retries}\t{str(e)}")
-                    continue
-                else:
-                    self.logger.error(f"Request ID [{request_id}] - Failed to add memory after retries.", str(e))
-                    raise e
+        _ = self.memory.add( message, user_id=user_id, metadata=metadata)
+        return
+
+        # for attempt in range(retries):
+        #     try:
+        #         _ = self.memory.add(
+        #             message, user_id=user_id, metadata=metadata
+        #         )
+        #         return
+        #     except Exception as e:
+        #         if attempt < retries - 1:
+        #             self.logger.warning(f"Request ID [{request_id}] - Retrying...{attempt+1}/{retries}\t{str(e)}")
+        #             continue
+        #         else:
+        #             self.logger.error(f"Request ID [{request_id}] - Failed to add memory after retries.", str(e))
+        #             raise e
 
     def add_memories_for_speaker(self, speaker, messages, timestamp, desc, pbar=None):
         # for i in range(0, len(messages), self.batch_size):
@@ -142,61 +145,83 @@ class MemoryADD:
                 pbar.update(1)
 
     def process_conversation(self, item, idx, pbar=None):
-        conversation = item["conversation"]
-        speaker_a = conversation["speaker_a"]
-        speaker_b = conversation["speaker_b"]
 
-        speaker_a_user_id = f"{speaker_a}_{idx}"
-        speaker_b_user_id = f"{speaker_b}_{idx}"
+        max_retries = 2  # 定义最大重试次数 (总共尝试 1 + 2 = 3 次)
 
-        # delete all memories for the two users
-        self.memory.delete_all(user_id=speaker_a_user_id)
-        self.memory.delete_all(user_id=speaker_b_user_id)
+        for attempt in range(max_retries + 1):
+            try:
+                conversation = item["conversation"]
+                speaker_a = conversation["speaker_a"]
+                speaker_b = conversation["speaker_b"]
 
-        for key in conversation.keys():
-            if key in ["speaker_a", "speaker_b"] or "date" in key or "timestamp" in key:
-                continue
+                speaker_a_user_id = f"{speaker_a}_{idx}"
+                speaker_b_user_id = f"{speaker_b}_{idx}"
 
-            date_time_key = key + "_date_time"
-            timestamp = conversation[date_time_key]
-            chats = conversation[key]
+                # delete all memories for the two users
+                self.memory.delete_all(user_id=speaker_a_user_id)
+                self.memory.delete_all(user_id=speaker_b_user_id)
 
-            messages = []
-            messages_reverse = []
-            for chat in chats:
-                context = chat['text']
-                if self.figure_view:
-                    if "img_url" in chat and "blip_caption" in chat:
-                        context += f" [Image: {chat['img_url']}] with caption: {chat['blip_caption']}"
-                if chat["speaker"] == speaker_a:
-                    messages.append({"role": "user", "content": f"{speaker_a}: {context}"})
-                    messages_reverse.append({"role": "assistant", "content": f"{speaker_a}: {context}"})
-                elif chat["speaker"] == speaker_b:
-                    messages.append({"role": "assistant", "content": f"{speaker_b}: {context}"})
-                    messages_reverse.append({"role": "user", "content": f"{speaker_b}: {context}"})
+                for key in conversation.keys():
+                    if key in ["speaker_a", "speaker_b"] or "date" in key or "timestamp" in key:
+                        continue
+
+                    date_time_key = key + "_date_time"
+                    timestamp = conversation[date_time_key]
+                    chats = conversation[key]
+
+                    messages = []
+                    messages_reverse = []
+                    for chat in chats:
+                        context = chat['text']
+                        if self.figure_view:
+                            if "img_url" in chat and "blip_caption" in chat:
+                                context += f" [Image: {chat['img_url']}] with caption: {chat['blip_caption']}"
+                        if chat["speaker"] == speaker_a:
+                            messages.append({"role": "user", "content": f"{speaker_a}: {context}"})
+                            messages_reverse.append({"role": "assistant", "content": f"{speaker_a}: {context}"})
+                        elif chat["speaker"] == speaker_b:
+                            messages.append({"role": "assistant", "content": f"{speaker_b}: {context}"})
+                            messages_reverse.append({"role": "user", "content": f"{speaker_b}: {context}"})
+                        else:
+                            raise ValueError(f"Unknown speaker: {chat['speaker']}")
+
+                    # add memories for the two users on different threads
+                    # thread_a = threading.Thread(
+                    #     target=self.add_memories_for_speaker,
+                    #     args=(speaker_a_user_id, messages, timestamp, "Adding Memories for Speaker A", pbar),
+                    # )
+                    # thread_b = threading.Thread(
+                    #     target=self.add_memories_for_speaker,
+                    #     args=(speaker_b_user_id, messages_reverse, timestamp, "Adding Memories for Speaker B", pbar),
+                    # )
+
+                    # thread_a.start()
+                    # thread_b.start()
+                    # thread_a.join()
+                    # thread_b.join()
+                
+                    self.add_memories_for_speaker(speaker_a_user_id, messages, timestamp, "Adding Memories for Speaker A", pbar)
+                    self.add_memories_for_speaker(speaker_b_user_id, messages_reverse, timestamp, "Adding Memories for Speaker B", pbar)
+                # --- 如果代码成功执行到这里，说明没有错误 ---
+                self.logger.info(f"Conversation {idx} processed successfully on attempt {attempt + 1}.")
+                return  # 成功后直接退出函数，不再重试
+
+            except Exception as e:
+                # --- 如果 try 块中任何地方发生错误，都会进入这里 ---
+                self.logger.warning(f"An error occurred on attempt {attempt + 1}/{max_retries + 1} for conversation {idx}. Error: {e}")
+                
+                if attempt < max_retries:
+                    # 如果还未达到最大重试次数，则等待一小段时间后重试
+                    self.logger.info(f"Retrying conversation {idx}...")
+                    time.sleep(1)  # 等待1秒，避免因瞬时问题立即重试导致连续失败
                 else:
-                    raise ValueError(f"Unknown speaker: {chat['speaker']}")
+                    # 如果已经达到最大重试次数，记录严重错误并放弃
+                    self.logger.error(f"Failed to process conversation {idx} after {max_retries + 1} attempts.")
+                    # 这里可以选择是抛出异常让整个程序停止，还是仅仅跳过这个item
+                    # raise e # 如果希望程序停止，取消这一行的注释
+                    return # 如果希望仅仅跳过这个失败的item，保留这行
 
-            # add memories for the two users on different threads
-            # thread_a = threading.Thread(
-            #     target=self.add_memories_for_speaker,
-            #     args=(speaker_a_user_id, messages, timestamp, "Adding Memories for Speaker A", pbar),
-            # )
-            # thread_b = threading.Thread(
-            #     target=self.add_memories_for_speaker,
-            #     args=(speaker_b_user_id, messages_reverse, timestamp, "Adding Memories for Speaker B", pbar),
-            # )
-
-            # thread_a.start()
-            # thread_b.start()
-            # thread_a.join()
-            # thread_b.join()
-           
-            self.add_memories_for_speaker(speaker_a_user_id, messages, timestamp, "Adding Memories for Speaker A", pbar)
-            self.add_memories_for_speaker(speaker_b_user_id, messages_reverse, timestamp, "Adding Memories for Speaker B", pbar)
-        
-        self.logger.info(f"Conversation {idx} messages added successfully")
-
+                
     # def process_all_conversations(self, max_workers=4):
     #     if not self.data:
     #         raise ValueError("No data loaded. Please set data_path and call load_data() first.")
@@ -206,7 +231,7 @@ class MemoryADD:
     #         for future in futures:
     #             future.result()
 
-    def process_all_conversations(self, max_workers=6):
+    def process_all_conversations(self, max_workers=10):
         if not self.data:
             raise ValueError("No data loaded. Please set data_path and call load_data() first.")
         total_batches = 0
