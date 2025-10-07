@@ -19,6 +19,7 @@ os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjg
 os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
 os.environ["BASE_MODEL"] = "Qwen/Qwen3-14B"
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["MEM0_TELEMETRY"] = "False"
 
 import subprocess
 import sys
@@ -111,52 +112,58 @@ def save_git_state(workspace_dir, reference_point="origin/main"):
 def run_command(command):
     """
     Executes a command, prints its combined stdout and stderr in real-time,
-    and raises an exception on failure. This version avoids deadlocks.
+    and raises an exception on failure. This version avoids deadlocks caused by tqdm.
     """
     print(f"\n🚀 Executing command:\n{' '.join(command)}\n")
     
     try:
-        # 核心改动：使用 Popen 并将 stderr 重定向到 STDOUT
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # <--- 这是关键！将 stderr 合并到 stdout
+            stderr=subprocess.STDOUT,
             text=True,
             encoding='utf-8',
-            bufsize=1  # 行缓冲
+            # bufsize=1, # bufsize=1 是行缓冲，这里我们需要无缓冲，所以可以去掉
         )
 
-        # 实时读取合并后的输出流
         print("-------------------- Real-time Output --------------------")
         
-        # 循环读取并打印，直到进程结束
+        # 核心改动：从 readline() 改为 read(1) 逐字符读取
         while True:
-            line = process.stdout.readline()
-            if not line:
-                break
-            sys.stdout.write(line)
-            sys.stdout.flush() # 确保立即显示
+            # 读取一个字符
+            char = process.stdout.read(1)
+            # 如果没有更多字符，且子进程已结束，则退出循环
+            if not char:
+                # 再次检查进程状态，确保完全退出
+                if process.poll() is not None:
+                    break
+                else:
+                    # 如果进程还在运行但没有输出，可以短暂休眠避免CPU空转
+                    # import time
+                    # time.sleep(0.01)
+                    continue
 
-        print("----------------------------------------------------------")
+            # 直接将字符打印到标准输出
+            sys.stdout.write(char)
+            # 立即刷新缓冲区，确保实时显示
+            sys.stdout.flush()
+
+        print("\n----------------------------------------------------------") # 加一个换行符，让格式更好看
         
-        # 等待进程结束
+        # 等待进程完全结束
         process.wait()
 
-        # 检查返回码
         if process.returncode != 0:
             print(f"❌ Command failed with exit code {process.returncode}")
-            # 抛出异常，以便上层代码可以捕获
             raise subprocess.CalledProcessError(
                 returncode=process.returncode,
                 cmd=command
             )
 
     except FileNotFoundError:
-        # command[0] 是要执行的程序，比如 'python'
         print(f"❌ Command not found. Make sure '{command[0]}' is in your PATH or the script path is correct.")
         raise
     except subprocess.CalledProcessError as e:
-        # 再次抛出，确保调用者知道失败了
         raise e
     except Exception as e:
         print(f"An unexpected error occurred: {e}")

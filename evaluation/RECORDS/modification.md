@@ -92,3 +92,13 @@ delete_all 操作也存在同样的问题，多个线程同时删除和重建，
 修改建议：
 
 在 process_all_conversations 方法中，with ThreadPoolExecutor(...) 语句块 之前，添加一步“预初始化”操作。最简单的方法就是执行一次无害的 add 操作，并立即删除，以此来强制 mem0 库完成 Collection 的创建。
+
+# 7. 匿名事件记录要关闭
+
+默认：
+
+```MEM0_TELEMETRY = os.environ.get("MEM0_TELEMETRY", "True")```
+
+因此需要：
+
+```os.environ["MEM0_TELEMETRY"] = "False"```
