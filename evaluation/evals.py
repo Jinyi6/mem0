@@ -40,6 +40,8 @@ def process_single_item(item):
         "category": category,
         # "f1_score": metrics["f1"],
         "llm_score": llm_score,
+        # "failure_mode": x x,
+        # "reasons_summary": x x,
     }
 
 def main():

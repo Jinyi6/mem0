@@ -133,6 +133,7 @@ Status: {status}
 
 
     def answer_question(self, speaker_1_user_id, speaker_2_user_id, question, answer, category, pbar=None, max_retries=51):
+        # TODO @gangyi 方案3 and 5，config中的参数控制
         speaker_1_memories, speaker_1_graph_memories, speaker_1_memory_time = self.search_memory(
             speaker_1_user_id, question, pbar=pbar
         )
