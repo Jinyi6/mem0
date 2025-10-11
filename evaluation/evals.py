@@ -4,13 +4,12 @@ import json
 from collections import defaultdict
 import os
 from tqdm import tqdm
+import sys
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
+sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
 
 # --- 环境设置 (保持不变) ---
 os.environ["LOCAL_MEM0_PATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
-os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
-os.environ["BASE_MODEL"] = "Qwen/Qwen3-14B"
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 from metrics.llm_judge import evaluate_llm_judge
 # from metrics.utils import calculate_metrics
@@ -48,10 +47,10 @@ def main():
     print("Starting evaluation...")
     parser = argparse.ArgumentParser(description="Evaluate RAG results")
     parser.add_argument(
-        "--input_file", type=str, default="/Users/jinyi/Documents/code/memory/mem0/exp_data/locomo/exp_data_0-10_2000/mem0_results_top_30_filter_False_graph_False.json", help="Path to the input dataset file"
+        "--input_file", type=str, required=True, help="Path to the input JSON file with model responses."
     )
     parser.add_argument(
-        "--output_file", type=str, default="/Users/jinyi/Documents/code/memory/mem0/exp_data/locomo/exp_data_0-10_2000/all_result.json", help="Path to save the evaluation results"
+        "--output_file", type=str, required=True, help="Path to save the evaluation results JSON file."
     )
     parser.add_argument("--max_workers", type=int, default=5, help="Maximum number of worker threads")
 

@@ -10,7 +10,6 @@ import os
 LOCAL_MEM0_PATH = os.getenv("LOCAL_MEM0_PATH")
 if not LOCAL_MEM0_PATH:
     raise ValueError("环境变量 LOCAL_MEM0_PATH 未设置，请在 .env 文件中配置。")
-# LOCAL_MEM0_PATH = "/Users/jinyi/Documents/code/memory/mem0" # ATTENTION: Change this to your local mem0 path
 
 if not os.path.exists(LOCAL_MEM0_PATH):
     raise ImportError(f"指定的本地 mem0 路径不存在: {LOCAL_MEM0_PATH}")
@@ -27,6 +26,7 @@ from mem0.memory.utils import extract_json
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL"))
 
+# LOCOMO version
 
 # ACCURACY_PROMPT = """
 # Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
@@ -54,9 +54,67 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_
 # Just return the label CORRECT or WRONG in a json format with the key as "label".
 # """
 
+# refined version within 10.1
+# ACCURACY_PROMPT = """
+# Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
+#     (1) a question (posed by one user to another user),
+#     (2) a ’gold’ (ground truth) answer,
+#     (3) a generated answer
+# which you will score as CORRECT/WRONG.
+
+# The point of the question is to ask about something one user should know about the other user based on their prior conversations.
+# The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
+# Question: Do you remember what I got the last time I went to Hawaii?
+# Gold answer: A shell necklace
+
+# DECISION RULES (apply all):
+# 1. EXACT FACT / CONTENT MATCH
+#   - CORRECT only if the generated answer is semantically equivalent to the gold answer and does NOT contradict it.
+#   - Ignore casing, punctuation, articles, and order when order is not semantically meaningful. Your judgement should be based on content itself, format is unrelative to its correctness. Synonyms/aliases are allowed only when they do not change the factual scope (e.g., “US” ≡ “United States”; “ten years” ≡ “10 years”; “Malia and Sasha” ≡ “Malia Obama and Sasha Obama”).
+# 2. COVERAGE / SUBSET
+#   - If the gold answer contains multiple required elements (entities, dates, attributes, list items, or facets), ALL must be present.
+#   - If the generated answer provides only a subset of gold ⇒ WRONG (response ⊂ gold).
+# Example: gold = “hiking, riding, running”; response = “hiking”.
+#   - If the generated answer includes extra elements not in gold ⇒ WRONG (gold ⊂ response), unless those extras are purely paraphrastic/trivial and introduce no new facts.
+# Example: gold = “agencies”; response = “agencies and lawyers” ⇒ WRONG.
+# 3. ABSTRACTION LEVEL
+#   - If the gold is ABSTRACT and the generated answer is MORE SPECIFIC (adds a specific date/entity/category not given), mark WRONG unless the added specificity is verbatim or entailed by the question (then allow).
+#   - If the gold is SPECIFIC and the generated answer is MORE GENERAL (e.g., “console” for “Nintendo game console”,  "Ferrari" ≠ "classic vintage cars"), mark WRONG.
+#   - Terminology equivalence (name - explanation/alias): When either the gold or the response is a specific term/proper name, treat the other as CORRECT if it gives a standard, identifying explanation or alias of the same term, without adding new facts or changing scope.
+# 4. TEMPORAL CONSISTENCY:
+#   - Dates/times must refer to the SAME calendar point or period as gold.
+#   - Ranges must match; a single date is wrong if gold is "the Sunday before 25 May 2023"; a different year/month/day is wrong; the response providing a more specific date than gold answer is wrong (eg. While the golden answer is "2023", the response is "7 May 2023").
+#   - Relative expressions ("last Tuesday") are CORRECT only if they unambiguously resolve to the SAME date/period as the gold answer. If ambiguous, mark WRONG.
+# 5. NO-INFORMATION / CONTRADICTION:
+#   - If the generated answer claims "not mentioned"/"no info"  ⇒ WRONG.
+#   - Any factual contradiction with the gold (including YES/NO inversions, different amounts, different entities, different locations) ⇒ WRONG.
+# 6. LINGUISTIC VARIATION:
+#   - Minor wording changes, plural/singular, and true name variants are fine (e.g., "Malia and Sasha" for "Malia Obama and Sasha Obama").
+    
+# TIE-BREAK RULE:
+# - If after applying the rules there is any uncertainty about equivalence or coverage, choose WRONG (favor precision over recall for reward stability).
+
+# Now it's time for the real question:
+# Question: {question}
+# Gold answer: {gold_answer}
+# Generated answer: {generated_answer}
+
+# First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
+# Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
+
+# Just return the label CORRECT or WRONG in a json format with the key as "label":
+
+# ```json
+# {{
+#     "label": "CORRECT" or "WRONG"
+# }}
+# """
+
+# refined version within 10.12
+
 ACCURACY_PROMPT = """
 Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
-    (1) a question (posed by one user to another user),
+    (1) a question (posed by one user to another),
     (2) a ’gold’ (ground truth) answer,
     (3) a generated answer
 which you will score as CORRECT/WRONG.
@@ -66,32 +124,60 @@ The gold answer will usually be a concise and short answer that includes the ref
 Question: Do you remember what I got the last time I went to Hawaii?
 Gold answer: A shell necklace
 
-DECISION RULES (apply all):
-1. EXACT FACT / CONTENT MATCH
-  - CORRECT only if the generated answer is semantically equivalent to the gold answer and does NOT contradict it.
-  - Ignore casing, punctuation, articles, and order when order is not semantically meaningful. Your judgement should be based on content itself, format is unrelative to its correctness. Synonyms/aliases are allowed only when they do not change the factual scope (e.g., “US” ≡ “United States”; “ten years” ≡ “10 years”; “Malia and Sasha” ≡ “Malia Obama and Sasha Obama”).
-2. COVERAGE / SUBSET
-  - If the gold answer contains multiple required elements (entities, dates, attributes, list items, or facets), ALL must be present.
-  - If the generated answer provides only a subset of gold ⇒ WRONG (response ⊂ gold).
-Example: gold = “hiking, riding, running”; response = “hiking”.
-  - If the generated answer includes extra elements not in gold ⇒ WRONG (gold ⊂ response), unless those extras are purely paraphrastic/trivial and introduce no new facts.
-Example: gold = “agencies”; response = “agencies and lawyers” ⇒ WRONG.
-3. ABSTRACTION LEVEL
-  - If the gold is ABSTRACT and the generated answer is MORE SPECIFIC (adds a specific date/entity/category not given), mark WRONG unless the added specificity is verbatim or entailed by the question (then allow).
-  - If the gold is SPECIFIC and the generated answer is MORE GENERAL (e.g., “console” for “Nintendo game console”,  "Ferrari" ≠ "classic vintage cars"), mark WRONG.
-  - Terminology equivalence (name - explanation/alias): When either the gold or the response is a specific term/proper name, treat the other as CORRECT if it gives a standard, identifying explanation or alias of the same term, without adding new facts or changing scope.
-4. TEMPORAL CONSISTENCY:
-  - Dates/times must refer to the SAME calendar point or period as gold.
-  - Ranges must match; a single date is wrong if gold is "the Sunday before 25 May 2023"; a different year/month/day is wrong; the response providing a more specific date than gold answer is wrong (eg. While the golden answer is "2023", the response is "7 May 2023").
-  - Relative expressions ("last Tuesday") are CORRECT only if they unambiguously resolve to the SAME date/period as the gold answer. If ambiguous, mark WRONG.
-5. NO-INFORMATION / CONTRADICTION:
-  - If the generated answer claims "not mentioned"/"no info"  ⇒ WRONG.
-  - Any factual contradiction with the gold (including YES/NO inversions, different amounts, different entities, different locations) ⇒ WRONG.
-6. LINGUISTIC VARIATION:
-  - Minor wording changes, plural/singular, and true name variants are fine (e.g., "Malia and Sasha" for "Malia Obama and Sasha Obama").
-    
-TIE-BREAK RULE:
-- If after applying the rules there is any uncertainty about equivalence or coverage, choose WRONG (favor precision over recall for reward stability).
+Decision Rules (minimal, to reduce false negatives without raising false positives):
+
+1) Entity & polarity lock (strict)
+   - The generated answer must refer to the same thing/person/time as the gold; any different entity/time or negation flip => WRONG.
+   - Examples:
+     • Gold: “A shell necklace”; Gen: “A pearl necklace” => WRONG.
+     • Gold: “He moved to Boston”; Gen: “He didn’t move to Boston” => WRONG.
+     • Gold: “June 2023”; Gen: “July 2023” => WRONG.
+
+2) Synonyms/aliases/format variants (allowed)
+   - Accept clear paraphrases, aliases, and format variants that mean the same thing.
+   - Also accept trivial form variations that keep the same concept: singular/plural/lemma changes; gerund vs noun phrasing; obvious short typos/truncations that still point to the same word.
+   - Accept causal paraphrases that clearly keep the same cause (e.g., “advised/recommended/introduced/told to try” ≈ “advice”).
+   - Examples:
+     • Gold: “snakes”; Gen: “snake” => CORRECT.
+     • Gold: “exploring the great outdoors”; Gen: “outdoor/outdoors/outdoor activities” => CORRECT.
+     • Gold: “friend’s advice”; Gen: “a friend introduced/recommended it” => CORRECT.
+     • Gold: “practicing basketball outside for hours”; Gen: “basketbal” (obvious cutoff) => CORRECT.
+     • Gold: “03/15/2021”; Gen: “March 15, 2021” => CORRECT.
+
+3) Specificity/entailment (one-way, head-preserving)
+   - More specific answers that logically entail the gold are CORRECT.
+   - Slight generalization is also CORRECT when it preserves the same head concept/topic and only drops modifiers or rolls up ONE level to the immediate parent category, without introducing alternatives.
+   - If the gold includes essential qualifiers whose removal changes identity (e.g., flavor/type/brand among many siblings) OR the question is a reason (“why…?”) but the answer gives only a preference/statement (not a cause), => WRONG.
+   - Examples (ACCEPT):
+     • Gold: “work”; Gen: “work stress” => CORRECT (same head).
+     • Gold: “cakes”; Gen: “baked goods” => CORRECT (immediate parent only).
+     • Gold: “malfunctioning navigation app on the new phone”; Gen: “phone app malfunction” => CORRECT (immediate parent; same domain).
+   - Examples (REJECT):
+     • Gold: “pepperoni pizza”; Gen: “pizza/food/Italian food” => WRONG (too broad; many siblings).
+     • Gold: “Coke”; Gen: “soda” => WRONG.
+     • Gold (why): “Possibly because he likes to drink beer on his days off.”; Gen: “He prefers beer / prefers beer over Starbucks.” => WRONG (not a cause; missing condition).
+
+4) Extra non-conflicting detail is fine; alternatives/hedging are not
+   - Extra descriptive detail is allowed if it doesn’t contradict the gold. Listing alternatives or hedging counts as WRONG.
+   - Examples:
+     • Gold: “A shell necklace”; Gen: “A shell necklace from the street market” => CORRECT.
+     • Gold: “Paris”; Gen: “Paris, France” => CORRECT.
+     • Gold: “A shell necklace”; Gen: “A shell necklace or earrings” => WRONG.
+     • Gold: “Paris”; Gen: “Maybe Paris?” => WRONG.
+
+5) Lists, numbers, units, and dates (tight equivalence)
+   - If the gold explicitly lists multiple required items, ALL must be present—no more, no less. Subsets/supersets/alternatives (“or/and-or/slash”) => WRONG.
+   - Treat text as a list only when the gold clearly enumerates parallel items (and/&/slash “/”/the Chinese “、/和/与/以及”/comma-separated parallel nouns). Not a list when a comma is part of a single named item (e.g., “Washington, D.C.”) or a numeric separator (“1,000”).
+   - Accept exact unit/date format equivalents (no value change). Do NOT accept vague approximations if the gold is exact.
+   - For subjective descriptions, if the gold lists multiple concrete attributes (e.g., taste/texture/colour: “super good, rich and creamy”), the generated answer must preserve those attributes (or clear paraphrases). Generic sentiment alone (“loved it”, “good”) => WRONG.
+     • Examples: Gold “Super good, rich and creamy”; Gen “He loved it” => WRONG; Gen “rich and creamy” => CORRECT.
+   - Approximate quantifiers vs exact numbers are NOT equivalent (e.g., “a few/several/a couple” ≠ “4/3/2” unless the gold itself says that mapping). 
+     • Examples: Gold “A few months”; Gen “4 months” => WRONG.
+   - Date granularity must MATCH (no broadening or narrowing): Day ≠ Month; Month ≠ Year.
+     • Examples: Gold “February, 2023”; Gen “8 February 2023” => WRONG.  Gold “March 15, 2021”; Gen “March 2021” => WRONG.
+   - Additional list examples:
+     • Gold: “different fantasy novels, characters, themes, and book recommendations”; Gen: “fantasy and book articles” => WRONG (missing listed items).
+     • Gold: “cat and dog”; Gen: “cat” => WRONG; Gen: “cat and dog” => CORRECT.
 
 Now it's time for the real question:
 Question: {question}
@@ -101,84 +187,6 @@ Generated answer: {generated_answer}
 First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
 Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
 
-Just return the label CORRECT or WRONG in a json format with the key as "label":
-
-```json
-{{
-    "label": "CORRECT" or "WRONG"
-}}
-"""
-ACCURACY_PROMPT_LJY = """
-Your task is to label a generated answer as ’CORRECT’ or ’WRONG’ based on a gold (ground truth) answer. Your evaluation must be strict and based on factual consistency.
-
-The core principle is: The generated answer is CORRECT if and only if it is factually and semantically equivalent to the gold answer.
-
-**DECISION RULES (apply all, in order):**
-
-**0. GRANULARITY ALIGNMENT:**
-* The level of detail in the answer must match the level of detail requested by the question. It should not be more general or vague.
-* **WRONG**:
-    * *Example (Temporal)*:
-        * Question: `On what exact date did you have your final interview with the Feishu team?`
-        * Gold Answer: `September 22, 2025`
-        * Generated Answer: `In September 2025`
-        * Reasoning: The question asks for an "exact date" (day-level granularity), but the answer only provides the month and year (month-level granularity). -> WRONG.
-
-**1. SEMANTIC EQUIVALENCE:**
-* **CORRECT**: The generated answer uses synonyms, paraphrasing, or different sentence structures but conveys the exact same information and scope as the gold answer.
-    * *Example*: Gold: `A military aptitude test` | Response: `An aptitude test for military service` -> CORRECT.
-    * *Example*: Gold: `Taking long road trips, embracing nature, and repairing cars` | Response: `Repairing cars, embracing nature, and taking long road trips` -> CORRECT (order doesn't matter for lists of activities).
-* **WRONG**: The generated answer uses words that seem related but change the meaning.
-    * *Example*: Gold: `Kundalini Yoga` | Response: `Aerial Yoga` -> WRONG (two different, specific types of yoga).
-
-**2. COVERAGE / SUBSET:**
-* **WRONG**: If the gold answer is a list of items, the generated answer must contain ALL items. A partial list is WRONG.
-    * *Example*: Gold: `'The Lord of the Rings', 'Harry Potter', and 'Star Wars'` | Response: `Star Wars` -> WRONG (subset).
-* **WRONG**: The generated answer must not add extra factual information not present in the gold answer.
-    * *Example*: Gold: `rock climbing, fishing` | Response: `rock climbing, fishing, and kayaking` -> WRONG (superset).
-
-**3. ABSTRACTION LEVEL:**
-* **WRONG**: The generated answer is a broader category (more general) than the specific gold answer.
-    * *Example*: Gold: `cake` | Response: `baked goods` -> WRONG.
-    * *Example*: Gold: `Street Fighter` | Response: `a video game` -> WRONG.
-* **WRONG**: The generated answer is a specific instance of a more general gold answer.
-    * *Example*: Gold: `a pet` | Response: `a cat` -> WRONG.
-
-**4. FACT vs. INFERENCE/REASON/OUTCOME:** This is a critical rule.
-* The generated answer must represent the SAME FACT as the gold answer, not a potential reason for it, a result of it, or an inference drawn from it.
-* **WRONG**:
-    * *Example 1 (Reason vs. Fact)*:
-        * Gold: `Fascinated by how machines work` (This is the motivation/reason).
-        * Response: `Dave started working on cars to open his own car maintenance shop` (This is the action/goal).
-        * Reasoning: The response is an action that might be *caused* by the fascination, but it is not the fascination itself. -> WRONG.
-    * *Example 2 (Fact vs. Outcome)*:
-        * Gold: `A trophy` (This is the specific item won).
-        * Response: `The team won` (This is the outcome that led to getting the trophy).
-        * Reasoning: Winning is the event, the trophy is the prize. They are not the same fact. -> WRONG.
-    * *Example 3 (Fact vs. Inference)*:
-        * Gold: `The doctor said it wasn't too serious` (This is a direct statement from a doctor).
-        * Response: `Tim acknowledged John's injury` (This is another person's action related to the injury).
-        * Reasoning: The doctor's diagnosis and Tim's acknowledgment are two separate events/facts. -> WRONG.
-
-**5. TEMPORAL CONSISTENCY:**
-* Dates, times, and date ranges must match exactly. A specific date does not match a period containing that date.
-* **WRONG**:
-    * *Example*: Gold: `The weekend before March 26, 2023` | Response: `March 26, 2023` -> WRONG (The gold answer refers to the period *before* the date, not the date itself).
-    * *Example*: Gold: `Summer of 2022` | Response: `August 11, 2023` -> WRONG (Wrong year).
-
-**6. CONTRADICTION / NO-INFORMATION:**
-* Any direct contradiction (e.g., `Yes` vs. `No`, `Minnesota` vs. `Michigan`) is WRONG.
-* Claiming no information exists (`None`, `Not mentioned`) when the gold answer provides information is WRONG.
-
-**TIE-BREAK RULE:**
-When in doubt, be strict and favor precision. If the generated answer is not a perfect factual and semantic match, label it as WRONG.
-
-Now, evaluate the following:
-Question: {question}
-Gold answer: {gold_answer}
-Generated answer: {generated_answer}
-
-First, provide a short (one sentence) explanation of your reasoning based on the rules above, then finish with CORRECT or WRONG.
 Just return the label CORRECT or WRONG in a json format with the key as "label":
 
 ```json
