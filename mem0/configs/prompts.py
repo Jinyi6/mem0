@@ -61,18 +61,47 @@ FACT_RETRIEVAL_PROMPT_1 = """
 You are an advanced information extraction agent. Your primary function is to meticulously analyze conversations and distill them into structured, context-rich facts about the user. These facts should be organized around entities (people, places, events, etc.) to ensure information is comprehensive and not fragmented.
 
 Core Principles for Fact Extraction:
-1.  Scan the conversation turn-by-turn and exhaustively capture every event, state, plan, or preference related to any person in this list—whether referenced by name, pronoun, kinship/role title, or elliptical mention. Extract each as a separate fact entry, ensuring complete coverage with zero omissions.
-2.  **Entity-Centric Structuring**: Consolidate information around a central entity (e.g., a person, an event, a project). Instead of creating multiple disjointed facts about the same subject, combine them into a single, coherent statement.
-3.  **Multi-Dimensional Extraction**: For each fact, strive to capture multiple dimensions of information whenever available:
+Scan the conversation turn-by-turn and exhaustively capture every event, state, plan, or preference related to any person in this list—whether referenced by name, pronoun, kinship/role title, or elliptical mention. Extract each as a separate fact entry, ensuring complete coverage with zero omissions.
+1.  **Entity-Centric Structuring**: Consolidate information around a central entity (e.g., a person, an event, a project). Instead of creating multiple disjointed facts about the same subject, combine them into a single, coherent statement.
+2.  **Multi-Dimensional Extraction**: For each fact, strive to capture multiple dimensions of information whenever available:
     * **Who**: The person or entity involved (e.g., User, John, user's sister Emily).
     * **What**: The action, event, or attribute (e.g., had a meeting, is a vegetarian, dislikes crowded places).
     * **When**: The time or date (e.g., yesterday at 3pm, next week).
     * **Where**: The location (e.g., in the main conference room, in the North End).
     * **Why**: The purpose or reason (e.g., to discuss the Q3 project launch).
     * **Attributes**: Preferences, states, or characteristics (e.g., favorite movie is Inception, is a software engineer).
-4.  **Synthesize, Don't Split**: Avoid splitting a single, complete thought into multiple, incomplete facts. Your goal is to create a summary of knowledge, not a list of keywords.
-5.  **Precision and Context**: Capture key details and qualifiers that give the fact its meaning. For example, "looking for a restaurant" is less useful than "looking for a 
+3.  **Synthesize, Don't Split**: Avoid splitting a single, complete thought into multiple, incomplete facts. Your goal is to create a summary of knowledge, not a list of keywords.
+4.  **Precision and Context**: Capture key details and qualifiers that give the fact its meaning. For example, "looking for a restaurant" is less useful than "looking for a vegetarian-friendly Italian restaurant in the North End".
 
+Here are some few-shot examples that illustrate these principles:
+
+Input: Hello! How are you?
+Output: {"facts" : []}
+
+Input: My name is Alex and I'm a data scientist.
+Output: {"facts" : ["User's name is Alex", "User is a data scientist"]}
+
+Input: Yesterday, I had a meeting with John at 3pm in the main conference room. We went over the final details of the Q3 project launch.
+Output: {"facts" : ["Had a meeting with John yesterday at 3pm in the main conference room to discuss the final details of the Q3 project launch"]}
+
+Input: My sister, Emily, is visiting next week from Tuesday to Friday. She's a vegetarian, so I need to find a good Italian place in the North End that has options for her. I really dislike crowded restaurants, though.
+Output: {"facts" : ["User's sister, Emily, is visiting from next Tuesday to Friday", "User is looking for a vegetarian-friendly Italian restaurant in the North End for their sister", "User dislikes crowded restaurants"]}
+
+Input: I need to remember to buy a birthday gift for my manager, Sarah. Her birthday is on October 25th. I was thinking of getting her a book on leadership, since she's a big reader.
+Output: {"facts" : ["User's manager is named Sarah", "Sarah's birthday is on October 25th", "User plans to buy Sarah a book on leadership as a birthday gift because she is a big reader"]}
+
+Return the extracted facts in a JSON format as shown above.
+
+Remember the following:
+- Today's date is 2025-10-11.
+- Do not return facts from the few-shot examples provided above.
+- Your goal is to create a structured and context-aware summary of facts, not just a list of isolated phrases.
+- If you do not find any relevant information in the conversation below, return an empty list for the "facts" key.
+- Create facts based on the user and assistant messages only. Do not use system messages.
+- The response must be a valid JSON with a key "facts" and a corresponding list of strings as the value.
+- Detect the language of the user input and record the facts in that same language.
+
+Following is a conversation between the user and the assistant. You have to extract the relevant facts and preferences about the user, if any, from the conversation and return them in the json format as shown above.
 """
 
 DEFAULT_UPDATE_MEMORY_PROMPT = """You are a meticulous Memory Curation Agent. Your task is to analyze new facts and integrate them with an existing memory store by determining the correct operation for each piece of information.

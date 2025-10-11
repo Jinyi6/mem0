@@ -225,6 +225,9 @@ def main():
             f"top_k_{exp_params['top_k']}_"
             f"filter_{exp_params['filter_memories']}_"
             f"graph_{exp_params['is_graph']}_"
+            f"{exp_params['fact_extraction_mode']}_"
+            f"{exp_params['memory_decision_mode']}_"
+            f"{exp_params['search_mode']}_"
             f"{timestamp}"
         )
         workspace_dir = os.path.join(setup_params['base_dir'], setup_params['dataset_name'], exp_name)
@@ -248,7 +251,7 @@ def main():
         print("="*80)
 
     # check code diff
-    save_git_state(workspace_dir)
+    # save_git_state(workspace_dir)
 
     # 3. Define all file paths within the workspace
     qdrant_path = os.path.join(workspace_dir, "qdrant_data")
@@ -279,9 +282,9 @@ def main():
         if exp_params.get("figure_view", False): add_command.append("--figure_view")
         if exp_params.get("is_graph", False): add_command.append("--is_graph")
         run_command(add_command)
-        print("✅ Step 1 completed successfully.")
+        print("✅ Step 1 completed successfully.", flush=True)
     else:
-        print("\n⏭️ Skipping Step 1: ADD MEMORIES. (Not required for '{exp_params['technique_type']}' or start_from_step > 1).")
+        print("\n⏭️ Skipping Step 1: ADD MEMORIES. (Not required for '{exp_params['technique_type']}' or start_from_step > 1).", flush=True)
 
     if args.start_from_step <= 2:
         print("\n" + "#"*25 + " STEP 2: SEARCH MEMORIES " + "#"*25)
@@ -301,7 +304,7 @@ def main():
         if exp_params.get("filter_memories", False): search_command.append("--filter_memories")
         if exp_params.get("is_graph", False): search_command.append("--is_graph")
         run_command(search_command)
-        print("✅ Step 2 completed successfully.")
+        print("✅ Step 2 completed successfully.", flush=True)
     else:
         print("\n⏭️ Skipping Step 2: SEARCH MEMORIES.")
 
@@ -314,9 +317,9 @@ def main():
             "--max_workers", str(config['eval_params']['max_workers'])
         ]
         run_command(eval_command)
-        print("✅ Step 3 completed successfully.")
+        print("✅ Step 3 completed successfully.", flush=True)
     else:
-        print("\n⏭️ Skipping Step 3: EVALUATE RESULTS.")
+        print("\n⏭️ Skipping Step 3: EVALUATE RESULTS.", flush=True)
 
     # if args.start_from_step <= 4:
     #     print("\n" + "#"*25 + " STEP 4: GENERATE SCORES " + "#"*25)
@@ -338,3 +341,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# nohup python run_pipeline.py --config ./config/default.json > pipeline.log 2>&1 &

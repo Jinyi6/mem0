@@ -14,7 +14,7 @@
     "is_graph": false,
     "figure_view": true,
     "embedder_model": "Pro/BAAI/bge-m3",
-    "fact_extraction_mode": "0",
+    "fact_extraction_mode": "1",
     "search_mode": "0",
     "memory_decision_mode": "0"
   },
