@@ -226,6 +226,8 @@ Status: {status}
         infer: bool = True,
         memory_type: Optional[str] = None,
         prompt: Optional[str] = None,
+        fact_extraction_mode: str = "0",
+        memory_decision_mode: str = "0",
     ):
         """
         Create a new memory.
@@ -264,7 +266,8 @@ Status: {status}
             LLMError: If LLM operations fail.
             DatabaseError: If database operations fail.
         """
-
+        self.fact_extraction_mode = fact_extraction_mode
+        self.memory_decision_mode = memory_decision_mode
         processed_metadata, effective_filters = _build_filters_and_metadata(
             user_id=user_id,
             agent_id=agent_id,

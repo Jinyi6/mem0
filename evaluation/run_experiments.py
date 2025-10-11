@@ -38,6 +38,10 @@ def main():
     parser.add_argument("--qdrant_path", type=str, default="./qdrant_data/tmp", help="Path for the Qdrant vector store")
     parser.add_argument("--dataset_name", type=str, default="locomo10_failed", help="Name of the dataset")
     parser.add_argument("--workspace_dir", type=str, default=".", help="Directory for all experiment outputs including logs.")
+    # fact_extraction_mode
+    parser.add_argument("--fact_extraction_mode", type=int, default=0, help="Fact extraction prompt mode")
+    parser.add_argument("--memory_decision_mode", type=int, default=0, help="Memory decision prompt mode")
+    parser.add_argument("--search_mode", type=int, default=0, help="Search mode")
 
     args = parser.parse_args()
 
@@ -97,6 +101,8 @@ def main():
                 figure_view=args.figure_view, 
                 embedder_model=args.embedder_model, 
                 qdrant_path=args.qdrant_path,
+                fact_extraction_mode=args.fact_extraction_mode,
+                memory_decision_mode=args.memory_decision_mode,
             )
             memory_manager.process_all_conversations()
         elif args.method == "search":
@@ -104,7 +110,7 @@ def main():
                 args.output_folder,
                 f"mem0_{args.dataset_name}_results_top_{args.top_k}_filter_{args.filter_memories}_graph_{args.is_graph}.json",
             )
-            memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph, logger=logger, qdrant_path=args.qdrant_path,)
+            memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph, logger=logger, qdrant_path=args.qdrant_path, search_method=args.search_mode)
             memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json")
     elif args.technique_type == "full_context":
         print("🚀 Running 'full_context' processing...")

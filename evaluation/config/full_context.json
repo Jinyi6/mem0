@@ -8,6 +8,7 @@
   },
   "exp_params": {
     "technique_type": "full_context",
+    "base_model": "Qwen/Qwen3-14B",
     "mode": "no_client_async",
     "top_k": 0,
     "filter_memories": false,

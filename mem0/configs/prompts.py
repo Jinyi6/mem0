@@ -10,6 +10,7 @@ Guidelines:
 
 Here are the details of the task:
 """
+
 FACT_RETRIEVAL_PROMPT = f"""You are an advanced information extraction agent. Your primary function is to meticulously analyze conversations and distill them into structured, context-rich facts about the user. These facts should be organized around entities (people, places, events, etc.) to ensure information is comprehensive and not fragmented.
 
 Core Principles for Fact Extraction:
@@ -54,6 +55,24 @@ Remember the following:
 - Detect the language of the user input and record the facts in that same language.
 
 Following is a conversation between the user and the assistant. You have to extract the relevant facts and preferences about the user, if any, from the conversation and return them in the json format as shown above.
+"""
+
+FACT_RETRIEVAL_PROMPT_1 = """
+You are an advanced information extraction agent. Your primary function is to meticulously analyze conversations and distill them into structured, context-rich facts about the user. These facts should be organized around entities (people, places, events, etc.) to ensure information is comprehensive and not fragmented.
+
+Core Principles for Fact Extraction:
+1.  Scan the conversation turn-by-turn and exhaustively capture every event, state, plan, or preference related to any person in this list—whether referenced by name, pronoun, kinship/role title, or elliptical mention. Extract each as a separate fact entry, ensuring complete coverage with zero omissions.
+2.  **Entity-Centric Structuring**: Consolidate information around a central entity (e.g., a person, an event, a project). Instead of creating multiple disjointed facts about the same subject, combine them into a single, coherent statement.
+3.  **Multi-Dimensional Extraction**: For each fact, strive to capture multiple dimensions of information whenever available:
+    * **Who**: The person or entity involved (e.g., User, John, user's sister Emily).
+    * **What**: The action, event, or attribute (e.g., had a meeting, is a vegetarian, dislikes crowded places).
+    * **When**: The time or date (e.g., yesterday at 3pm, next week).
+    * **Where**: The location (e.g., in the main conference room, in the North End).
+    * **Why**: The purpose or reason (e.g., to discuss the Q3 project launch).
+    * **Attributes**: Preferences, states, or characteristics (e.g., favorite movie is Inception, is a software engineer).
+4.  **Synthesize, Don't Split**: Avoid splitting a single, complete thought into multiple, incomplete facts. Your goal is to create a summary of knowledge, not a list of keywords.
+5.  **Precision and Context**: Capture key details and qualifiers that give the fact its meaning. For example, "looking for a restaurant" is less useful than "looking for a 
+
 """
 
 DEFAULT_UPDATE_MEMORY_PROMPT = """You are a meticulous Memory Curation Agent. Your task is to analyze new facts and integrate them with an existing memory store by determining the correct operation for each piece of information.

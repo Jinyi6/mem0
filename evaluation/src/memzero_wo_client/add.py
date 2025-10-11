@@ -104,6 +104,20 @@ class MemoryADD:
         self.data = None
         self.is_graph = is_graph
         self.figure_view = kwargs.get("figure_view", False)
+        self.fact_extraction_mode = int(kwargs.get("fact_extraction_mode", "0"))
+        self.memory_decision_mode = int(kwargs.get("memory_decision_mode", "0"))
+        if self.fact_extraction_mode == 0:
+            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT 
+            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT
+        elif self.fact_extraction_mode == 1:
+            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_1
+            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_1
+
+        if self.memory_decision_mode == 0:
+            from mem0.configs.prompts import DEFAULT_UPDATE_MEMORY_PROMPT
+            config["custom_memory_decision_prompt"] = DEFAULT_UPDATE_MEMORY_PROMPT
+        # please modify the prompt in mem0/configs/prompts.py if you want to change the memory decision prompt
+
         if data_path:
             self.load_data()
         # Create the memory object first
@@ -119,7 +133,7 @@ class MemoryADD:
 
     def add_memory(self, user_id, message, metadata, retries=2):
         request_id = f"add-mem-{uuid.uuid4()}"
-        _ = self.memory.add( message, user_id=user_id, metadata=metadata)
+        _ = self.memory.add( message, user_id=user_id, metadata=metadata, fact_extraction_mode=self.fact_extraction_mode, memory_decision_mode=self.memory_decision_mode)
         return
 
         # for attempt in range(retries):

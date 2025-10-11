@@ -17,7 +17,6 @@ os.environ["LOCAL_MEM0_PATH"] = os.path.dirname(os.path.dirname(os.path.abspath(
 # Set the OpenAI API key
 os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
 os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
-os.environ["BASE_MODEL"] = "Qwen/Qwen3-14B"
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["MEM0_TELEMETRY"] = "False"
 
@@ -211,9 +210,9 @@ def main():
     print(f"📄 Loading configuration from: {args.config}")
     with open(args.config, 'r') as f:
         config = json.load(f)
-
     setup_params = config["experiment_setup"]
     exp_params = config["exp_params"]
+    os.environ["BASE_MODEL"] = exp_params.get("base_model", "Qwen/Qwen3-14B")
 
     # 2. Setup Experiment Workspace based on start_from_step
     workspace_dir = ""
@@ -274,6 +273,8 @@ def main():
             "--embedder_model", exp_params['embedder_model'],
             "--qdrant_path", qdrant_path,
             "--workspace_dir", workspace_dir,
+            "--fact_extraction_mode", exp_params.get("fact_extraction_mode", "0"),
+            "--memory_decision_mode", exp_params.get("memory_decision_mode", "0"),
         ]
         if exp_params.get("figure_view", False): add_command.append("--figure_view")
         if exp_params.get("is_graph", False): add_command.append("--is_graph")
@@ -295,6 +296,7 @@ def main():
             "--embedder_model", exp_params['embedder_model'],
             "--qdrant_path", qdrant_path,
             "--workspace_dir", workspace_dir,
+            "--search_mode", exp_params.get("search_mode", "0"),
         ]
         if exp_params.get("filter_memories", False): search_command.append("--filter_memories")
         if exp_params.get("is_graph", False): search_command.append("--is_graph")
@@ -316,17 +318,17 @@ def main():
     else:
         print("\n⏭️ Skipping Step 3: EVALUATE RESULTS.")
 
-    if args.start_from_step <= 4:
-        print("\n" + "#"*25 + " STEP 4: GENERATE SCORES " + "#"*25)
-        score_command = [
-            "python", "-u", "./generate_scores_args.py",
-            "--input_file", eval_metrics_path,
-            "--output_file", final_scores_path
-        ]
-        run_command(score_command)
-        print("✅ Step 4 completed successfully.")
-    else:
-        print("\n⏭️ Skipping Step 4: GENERATE SCORES.")
+    # if args.start_from_step <= 4:
+    #     print("\n" + "#"*25 + " STEP 4: GENERATE SCORES " + "#"*25)
+    #     score_command = [
+    #         "python", "-u", "./generate_scores_args.py",
+    #         "--input_file", eval_metrics_path,
+    #         "--output_file", final_scores_path
+    #     ]
+    #     run_command(score_command)
+    #     print("✅ Step 4 completed successfully.")
+    # else:
+    #     print("\n⏭️ Skipping Step 4: GENERATE SCORES.")
 
     print("\n" + "="*80)
     print("🎉🎉🎉 Experiment pipeline finished successfully! 🎉🎉🎉")
