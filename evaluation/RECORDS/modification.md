@@ -104,3 +104,9 @@ delete_all 操作也存在同样的问题，多个线程同时删除和重建，
 ```os.environ["MEM0_TELEMETRY"] = "False"```
 
 # 8. search 合并 @刚毅
+
+# 9. 框架整体优化
+
+# 10. 在线访问
+
+需求：

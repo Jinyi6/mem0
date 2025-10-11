@@ -28,31 +28,31 @@ from mem0.memory.utils import extract_json
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL"))
 
 
-ACCURACY_PROMPT = """
-Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
-    (1) a question (posed by one user to another user), 
-    (2) a ’gold’ (ground truth) answer, 
-    (3) a generated answer
-which you will score as CORRECT/WRONG.
+# ACCURACY_PROMPT = """
+# Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
+#     (1) a question (posed by one user to another user), 
+#     (2) a ’gold’ (ground truth) answer, 
+#     (3) a generated answer
+# which you will score as CORRECT/WRONG.
 
-The point of the question is to ask about something one user should know about the other user based on their prior conversations.
-The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
-Question: Do you remember what I got the last time I went to Hawaii?
-Gold answer: A shell necklace
-The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT. 
+# The point of the question is to ask about something one user should know about the other user based on their prior conversations.
+# The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
+# Question: Do you remember what I got the last time I went to Hawaii?
+# Gold answer: A shell necklace
+# The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT. 
 
-For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
+# For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
 
-Now it's time for the real question:
-Question: {question}
-Gold answer: {gold_answer}
-Generated answer: {generated_answer}
+# Now it's time for the real question:
+# Question: {question}
+# Gold answer: {gold_answer}
+# Generated answer: {generated_answer}
 
-First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
-Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
+# First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
+# Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
 
-Just return the label CORRECT or WRONG in a json format with the key as "label".
-"""
+# Just return the label CORRECT or WRONG in a json format with the key as "label".
+# """
 
 ACCURACY_PROMPT = """
 Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
@@ -101,6 +101,84 @@ Generated answer: {generated_answer}
 First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
 Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
 
+Just return the label CORRECT or WRONG in a json format with the key as "label":
+
+```json
+{{
+    "label": "CORRECT" or "WRONG"
+}}
+"""
+ACCURACY_PROMPT_LJY = """
+Your task is to label a generated answer as ’CORRECT’ or ’WRONG’ based on a gold (ground truth) answer. Your evaluation must be strict and based on factual consistency.
+
+The core principle is: The generated answer is CORRECT if and only if it is factually and semantically equivalent to the gold answer.
+
+**DECISION RULES (apply all, in order):**
+
+**0. GRANULARITY ALIGNMENT:**
+* The level of detail in the answer must match the level of detail requested by the question. It should not be more general or vague.
+* **WRONG**:
+    * *Example (Temporal)*:
+        * Question: `On what exact date did you have your final interview with the Feishu team?`
+        * Gold Answer: `September 22, 2025`
+        * Generated Answer: `In September 2025`
+        * Reasoning: The question asks for an "exact date" (day-level granularity), but the answer only provides the month and year (month-level granularity). -> WRONG.
+
+**1. SEMANTIC EQUIVALENCE:**
+* **CORRECT**: The generated answer uses synonyms, paraphrasing, or different sentence structures but conveys the exact same information and scope as the gold answer.
+    * *Example*: Gold: `A military aptitude test` | Response: `An aptitude test for military service` -> CORRECT.
+    * *Example*: Gold: `Taking long road trips, embracing nature, and repairing cars` | Response: `Repairing cars, embracing nature, and taking long road trips` -> CORRECT (order doesn't matter for lists of activities).
+* **WRONG**: The generated answer uses words that seem related but change the meaning.
+    * *Example*: Gold: `Kundalini Yoga` | Response: `Aerial Yoga` -> WRONG (two different, specific types of yoga).
+
+**2. COVERAGE / SUBSET:**
+* **WRONG**: If the gold answer is a list of items, the generated answer must contain ALL items. A partial list is WRONG.
+    * *Example*: Gold: `'The Lord of the Rings', 'Harry Potter', and 'Star Wars'` | Response: `Star Wars` -> WRONG (subset).
+* **WRONG**: The generated answer must not add extra factual information not present in the gold answer.
+    * *Example*: Gold: `rock climbing, fishing` | Response: `rock climbing, fishing, and kayaking` -> WRONG (superset).
+
+**3. ABSTRACTION LEVEL:**
+* **WRONG**: The generated answer is a broader category (more general) than the specific gold answer.
+    * *Example*: Gold: `cake` | Response: `baked goods` -> WRONG.
+    * *Example*: Gold: `Street Fighter` | Response: `a video game` -> WRONG.
+* **WRONG**: The generated answer is a specific instance of a more general gold answer.
+    * *Example*: Gold: `a pet` | Response: `a cat` -> WRONG.
+
+**4. FACT vs. INFERENCE/REASON/OUTCOME:** This is a critical rule.
+* The generated answer must represent the SAME FACT as the gold answer, not a potential reason for it, a result of it, or an inference drawn from it.
+* **WRONG**:
+    * *Example 1 (Reason vs. Fact)*:
+        * Gold: `Fascinated by how machines work` (This is the motivation/reason).
+        * Response: `Dave started working on cars to open his own car maintenance shop` (This is the action/goal).
+        * Reasoning: The response is an action that might be *caused* by the fascination, but it is not the fascination itself. -> WRONG.
+    * *Example 2 (Fact vs. Outcome)*:
+        * Gold: `A trophy` (This is the specific item won).
+        * Response: `The team won` (This is the outcome that led to getting the trophy).
+        * Reasoning: Winning is the event, the trophy is the prize. They are not the same fact. -> WRONG.
+    * *Example 3 (Fact vs. Inference)*:
+        * Gold: `The doctor said it wasn't too serious` (This is a direct statement from a doctor).
+        * Response: `Tim acknowledged John's injury` (This is another person's action related to the injury).
+        * Reasoning: The doctor's diagnosis and Tim's acknowledgment are two separate events/facts. -> WRONG.
+
+**5. TEMPORAL CONSISTENCY:**
+* Dates, times, and date ranges must match exactly. A specific date does not match a period containing that date.
+* **WRONG**:
+    * *Example*: Gold: `The weekend before March 26, 2023` | Response: `March 26, 2023` -> WRONG (The gold answer refers to the period *before* the date, not the date itself).
+    * *Example*: Gold: `Summer of 2022` | Response: `August 11, 2023` -> WRONG (Wrong year).
+
+**6. CONTRADICTION / NO-INFORMATION:**
+* Any direct contradiction (e.g., `Yes` vs. `No`, `Minnesota` vs. `Michigan`) is WRONG.
+* Claiming no information exists (`None`, `Not mentioned`) when the gold answer provides information is WRONG.
+
+**TIE-BREAK RULE:**
+When in doubt, be strict and favor precision. If the generated answer is not a perfect factual and semantic match, label it as WRONG.
+
+Now, evaluate the following:
+Question: {question}
+Gold answer: {gold_answer}
+Generated answer: {generated_answer}
+
+First, provide a short (one sentence) explanation of your reasoning based on the rules above, then finish with CORRECT or WRONG.
 Just return the label CORRECT or WRONG in a json format with the key as "label":
 
 ```json

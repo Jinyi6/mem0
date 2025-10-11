@@ -33,14 +33,9 @@ evaluation/nohup.out
 evaluation/qdrant_data/tmp
 .conda
 .github
-evaluation/exp_data/*.zip
-evaluation/exp_data/Membenchdata
-evaluation/dataset/Membench/Categorical data
-evaluation/dataset/Membench/data
-evaluation/dataset/Membench/data2test_default
-evaluation/evaluation/qdrant_data/tmp/
 evaluation/exp_data
-!evaluation/exp_data/Memory
+.github
+evaluation/dataset/membench
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
