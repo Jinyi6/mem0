@@ -266,7 +266,7 @@ def main():
     # --- Execute Pipeline Steps Conditionally ---
     
     if args.start_from_step <= 1 and exp_params['technique_type'] not in ["full_context", "openai"]:
-        print("\n" + "#"*25 + " STEP 1: ADD MEMORIES " + "#"*25)
+        print("\n" + "#"*25 + " STEP 1: ADD MEMORIES " + "#"*25, flush=True)
         add_command = [
             "python", "-u", "./run_experiments.py",
             "--method", "add",
@@ -287,7 +287,7 @@ def main():
         print("\n⏭️ Skipping Step 1: ADD MEMORIES. (Not required for '{exp_params['technique_type']}' or start_from_step > 1).", flush=True)
 
     if args.start_from_step <= 2:
-        print("\n" + "#"*25 + " STEP 2: SEARCH MEMORIES " + "#"*25)
+        print("\n" + "#"*25 + " STEP 2: SEARCH MEMORIES " + "#"*25, flush=True)
         search_command = [
             "python", "-u", "./run_experiments.py",
             "--method", "search",
@@ -306,10 +306,10 @@ def main():
         run_command(search_command)
         print("✅ Step 2 completed successfully.", flush=True)
     else:
-        print("\n⏭️ Skipping Step 2: SEARCH MEMORIES.")
+        print("\n⏭️ Skipping Step 2: SEARCH MEMORIES.", flush=True)
 
     if args.start_from_step <= 3:
-        print("\n" + "#"*25 + " STEP 3: EVALUATE RESULTS " + "#"*25)
+        print("\n" + "#"*25 + " STEP 3: EVALUATE RESULTS " + "#"*25, flush=True)
         eval_command = [
             "python", "-u", "./evals.py",
             "--input_file", search_results_path,
@@ -336,7 +336,7 @@ def main():
     print("\n" + "="*80)
     print("🎉🎉🎉 Experiment pipeline finished successfully! 🎉🎉🎉")
     print(f"📊 All results, logs, and data are saved in:\n{workspace_dir}")
-    print(f"📈 Final scores can be found in:\n{final_scores_path}")
+    # print(f"📈 Final scores can be found in:\n{final_scores_path}")
     print("="*80)
 
 if __name__ == "__main__":
