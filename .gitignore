@@ -36,6 +36,7 @@ evaluation/qdrant_data/tmp
 evaluation/exp_data
 .github
 evaluation/dataset/membench
+evaluation/dataset/membench_mem0
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
