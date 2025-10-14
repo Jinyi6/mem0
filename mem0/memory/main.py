@@ -968,7 +968,7 @@ Status: {status}
             self._delete_memory(memory.id)
         self.vector_store.reset()
 
-        self.logger.info(f"Deleted {len(memories)} memories")
+        self.logger.info(f"Deleted {len(memories)} memories. (user_id={user_id}, agent_id={agent_id}, run_id={run_id})")
 
         if self.enable_graph:
             self.graph.delete_all(filters)
@@ -1846,7 +1846,7 @@ class AsyncMemory(MemoryBase):
 
         await asyncio.gather(*delete_tasks)
 
-        self.logger.info(f"Deleted {len(memories[0])} memories")
+        self.logger.info(f"Deleted {len(memories[0])} memories. (user_id={user_id}, agent_id={agent_id}, run_id={run_id})")
 
         if self.enable_graph:
             await asyncio.to_thread(self.graph.delete_all, filters)

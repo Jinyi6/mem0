@@ -228,6 +228,7 @@ def main():
             f"{exp_params['fact_extraction_mode']}_"
             f"{exp_params['memory_decision_mode']}_"
             f"{exp_params['search_mode']}_"
+            f"{exp_params['answer_mode']}_"
             f"{timestamp}"
         )
         workspace_dir = os.path.join(setup_params['base_dir'], setup_params['dataset_name'], exp_name)
@@ -255,12 +256,18 @@ def main():
 
     # 3. Define all file paths within the workspace
     qdrant_path = os.path.join(workspace_dir, "qdrant_data")
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     search_results_filename = (
+        f"mem0_{setup_params['dataset_name']}_results_top_{exp_params['top_k']}_"
+        f"filter_{exp_params['filter_memories']}_graph_{exp_params['is_graph']}_"
+        f"{timestamp}_{exp_params['fact_extraction_mode']}_{exp_params['memory_decision_mode']}_{exp_params['search_mode']}_{exp_params['answer_mode']}.json"
+    )
+    search_results_filenameold = (
         f"mem0_{setup_params['dataset_name']}_results_top_{exp_params['top_k']}_"
         f"filter_{exp_params['filter_memories']}_graph_{exp_params['is_graph']}.json"
     )
     search_results_path = os.path.join(workspace_dir, search_results_filename)
-    eval_metrics_path = os.path.join(workspace_dir, "evaluation_metrics.json")
+    eval_metrics_path = os.path.join(workspace_dir, f"evaluation_metrics_{timestamp}.json")
     final_scores_path = os.path.join(workspace_dir, "final_scores.txt")
 
     # --- Execute Pipeline Steps Conditionally ---
@@ -300,10 +307,16 @@ def main():
             "--qdrant_path", qdrant_path,
             "--workspace_dir", workspace_dir,
             "--search_mode", exp_params.get("search_mode", "0"),
+            "--answer_mode", exp_params.get("answer_mode", "0"), 
         ]
         if exp_params.get("filter_memories", False): search_command.append("--filter_memories")
         if exp_params.get("is_graph", False): search_command.append("--is_graph")
         run_command(search_command)
+        # rename the output file to include timestamp
+        old_path = os.path.join(workspace_dir, search_results_filenameold)
+        if os.path.exists(old_path):
+            os.rename(old_path, search_results_path)
+            print(f"Renamed search results file to include timestamp:\n{search_results_path}")
         print("✅ Step 2 completed successfully.", flush=True)
     else:
         print("\n⏭️ Skipping Step 2: SEARCH MEMORIES.", flush=True)

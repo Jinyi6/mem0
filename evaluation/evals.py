@@ -11,6 +11,11 @@ sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
 # --- 环境设置 (保持不变) ---
 os.environ["LOCAL_MEM0_PATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
+os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["MEM0_TELEMETRY"] = "False"
+
 from metrics.llm_judge import evaluate_llm_judge
 # from metrics.utils import calculate_metrics
 

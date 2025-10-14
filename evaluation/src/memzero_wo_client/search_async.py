@@ -111,7 +111,7 @@ class MemorySearch:
     - 方法5: 关键词提取 + PRF扩展 + Reranking + MMR多样化
     """
     
-    def __init__(self, output_path="results.json", top_k=10, filter_memories=False, is_graph=False, logger=None, qdrant_path=None, search_method=5):
+    def __init__(self, output_path="results.json", top_k=10, filter_memories=False, is_graph=False, logger=None, qdrant_path=None, search_method=5, answer_mode=0):
         config = {
             "llm": {
                 "provider": "openai",
@@ -159,7 +159,22 @@ class MemorySearch:
         if self.is_graph:
             self.ANSWER_PROMPT = ANSWER_PROMPT_GRAPH
         else:
-            self.ANSWER_PROMPT = ANSWER_PROMPT
+            if answer_mode == 0:
+                self.ANSWER_PROMPT = ANSWER_PROMPT
+            elif answer_mode == 1:
+                from prompts import ANSWER_PROMPT_1
+                self.ANSWER_PROMPT = ANSWER_PROMPT_1
+            elif answer_mode == 2:
+                from prompts import ANSWER_PROMPT_2
+                self.ANSWER_PROMPT = ANSWER_PROMPT_2
+            elif  answer_mode == 3:
+                from prompts import ANSWER_PROMPT_3
+                self.ANSWER_PROMPT = ANSWER_PROMPT_3
+            elif  answer_mode == 4:
+                from prompts import ANSWER_PROMPT_4
+                self.ANSWER_PROMPT = ANSWER_PROMPT_4
+            
+            
 
     def search_memory(self, user_id, query, max_retries=5, pbar=None):
         """
@@ -278,6 +293,7 @@ Status: {status}
         Returns:
             tuple: (search_1_memory, search_2_memory) - 两个说话者的记忆列表
         """
+        top_k_rerank = self.top_k
 
         if search_method == 3:
             # ========== 方法3: 问题分解 + 多查询搜索 + Reranking ==========
