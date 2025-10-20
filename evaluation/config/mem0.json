@@ -1,7 +1,7 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo1_failed_half",
+    "dataset_name": "locomo10_2",
     "existing_workspace_dir": "",
     "existing_workspace_dir_example": "./exp_data/locomo10_failed/locomo10_failed_top_k_100_filter_False_graph_False_20250928_224809"
   },
@@ -16,7 +16,7 @@
     "fact_extraction_mode": "3",
     "search_mode": "5",
     "memory_decision_mode": "1",
-    "answer_mode": "5"
+    "answer_mode": "6"
   },
   "eval_params": {
     "max_workers": 5
