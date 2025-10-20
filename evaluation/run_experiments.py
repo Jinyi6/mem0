@@ -43,8 +43,19 @@ def main():
     parser.add_argument("--memory_decision_mode", type=int, default=0, help="Memory decision prompt mode")
     parser.add_argument("--search_mode", type=int, default=0, help="Search mode")
     parser.add_argument("--answer_mode", type=int, default=0, help="Answer prompt mode")
+    parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of worker threads")
+    parser.add_argument("--collection_name", type=str, default=None, help="Override Qdrant collection name (optional)")
 
     args = parser.parse_args()
+
+    # Ensure workspace directory exists early (important for derived paths)
+    os.makedirs(args.workspace_dir, exist_ok=True)
+
+    # Derive a workspace-scoped MEM0_DIR when not provided to avoid Qdrant local path clashes
+    if not os.environ.get("MEM0_DIR"):
+        derived_mem0_dir = os.path.join(args.workspace_dir, ".mem0_state")
+        os.makedirs(derived_mem0_dir, exist_ok=True)
+        os.environ["MEM0_DIR"] = derived_mem0_dir
 
     # 1. Create a dynamic log file name
     # log_dir = f"logs/{args.dataset_name}"
@@ -73,6 +84,11 @@ def main():
     file_handler = logging.FileHandler(log_file_path, mode='a', encoding='utf-8')
     file_handler.setFormatter(log_formatter)
     logger.addHandler(file_handler)
+    # Mirror logs to stdout for better visibility during pipeline runs
+    # stream_handler = logging.StreamHandler(sys.stdout)
+    # stream_handler.setFormatter(log_formatter)
+    # logger.addHandler(stream_handler)
+    # logger.propagate = False
 
     # 3. Print the log file path for the user to know
     print("="*80)
@@ -104,15 +120,26 @@ def main():
                 qdrant_path=args.qdrant_path,
                 fact_extraction_mode=int(args.fact_extraction_mode),
                 memory_decision_mode=int(args.memory_decision_mode),
+                collection_name=args.collection_name,
             )
-            memory_manager.process_all_conversations()
+            memory_manager.process_all_conversations(max_workers=args.max_workers)
         elif args.method == "search":
             output_file_path = os.path.join(
                 args.output_folder,
                 f"mem0_{args.dataset_name}_results_top_{args.top_k}_filter_{args.filter_memories}_graph_{args.is_graph}.json",
             )
-            memory_searcher = MemorySearch(output_file_path, args.top_k, args.filter_memories, args.is_graph, logger=logger, qdrant_path=args.qdrant_path, search_method=int(args.search_mode), answer_mode=int(args.answer_mode))
-            memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json")
+            memory_searcher = MemorySearch(
+                output_file_path,
+                args.top_k,
+                args.filter_memories,
+                args.is_graph,
+                logger=logger,
+                qdrant_path=args.qdrant_path,
+                search_method=int(args.search_mode),
+                answer_mode=int(args.answer_mode),
+                collection_name=args.collection_name,
+            )
+            memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json", max_workers=args.max_workers)
     elif args.technique_type == "full_context":
         print("🚀 Running 'full_context' processing...")
         output_file_path = os.path.join(
@@ -129,8 +156,7 @@ def main():
         # The main processing call
         full_context_manager.process_data_file(
             file_path=f"./dataset/{args.dataset_name}.json",
-            # You can make max_workers an argparse parameter if needed
-            max_workers=10 
+            max_workers=args.max_workers
         )
     # elif args.technique_type == "rag":
     #     output_file_path = os.path.join(args.output_folder, f"rag_results_{args.chunk_size}_k{args.num_chunks}.json")

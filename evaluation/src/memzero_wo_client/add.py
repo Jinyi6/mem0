@@ -1,12 +1,14 @@
 import json
+import logging
 import os
+import random
+import re
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import json
-import logging
-import uuid 
+from pathlib import Path
+import traceback
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -27,7 +29,6 @@ print("="*80)
 print(f"✅ 成功将本地 mem0 库路径添加到环境中: {LOCAL_MEM0_PATH}")
 print("="*80)
 from mem0 import Memory
-import math
 load_dotenv()
 
 model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
@@ -65,40 +66,40 @@ Generate personal memories that follow these guidelines:
 
 
 
-import random   
-
 class MemoryADD:
     def __init__(self, data_path=None, batch_size=6, is_graph=False, logger=None, **kwargs):
         config = {
             "llm": {
-            "provider": "openai",
-            "config": {
-                "model": model_name,
-                "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
-                "temperature": 0.1,
-                "max_tokens": 2000,
-                # "prompts": {
-                #     "memory_creation": custom_instructions
-                # }
-            }
+                "provider": "openai",
+                "config": {
+                    "model": model_name,
+                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
+                    "temperature": 0.1,
+                    "max_tokens": 2000,
+                    # "prompts": {
+                    #     "memory_creation": custom_instructions
+                    # }
+                },
             },
             "embedder": {
-            "provider": "openai",
-            "config": {
-                "model": kwargs.get("embedder_model", "BAAI/bge-m3"),
-                "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
-            }
+                "provider": "openai",
+                "config": {
+                    "model": kwargs.get("embedder_model", "BAAI/bge-m3"),
+                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
+                },
             },
             "vector_store": {
-            "provider": "qdrant",
-            "config": {
-                "path": kwargs.get("qdrant_path", "./qdrant_data/tmp"),
-                "on_disk": True,
-                "embedding_model_dims": 1024
-            }
+                "provider": "qdrant",
+                "config": {
+                    "path": kwargs.get("qdrant_path", "./qdrant_data/tmp"),
+                    "on_disk": True,
+                    "embedding_model_dims": 1024,
+                },
             },
             "version": "v1.1",
         }
+
+        self.logger = logger if logger else logging.getLogger(__name__)
         self.batch_size = batch_size
         self.data_path = data_path
         self.data = None
@@ -106,69 +107,153 @@ class MemoryADD:
         self.figure_view = kwargs.get("figure_view", False)
         self.fact_extraction_mode = int(kwargs.get("fact_extraction_mode", "0"))
         self.memory_decision_mode = int(kwargs.get("memory_decision_mode", "0"))
+
+        qdrant_path = config["vector_store"]["config"]["path"]
+        os.makedirs(qdrant_path, exist_ok=True)
+        self.collection_name = kwargs.get("collection_name") or self._derive_collection_name(qdrant_path)
+        config["vector_store"]["config"]["collection_name"] = self.collection_name
+        self.logger.info(
+            f"Using Qdrant path '{qdrant_path}' with collection '{self.collection_name}' for memory writes."
+        )
+
         if self.fact_extraction_mode == 0:
-            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT 
+            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT
+
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT
         elif self.fact_extraction_mode == 1:
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_1
+
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_1
         elif self.fact_extraction_mode == 2:
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_2
+
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_2
         elif self.fact_extraction_mode == 3:
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_3
-            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_3
 
+            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_3
 
         if self.memory_decision_mode == 0:
             from mem0.configs.prompts import DEFAULT_UPDATE_MEMORY_PROMPT
+
             config["custom_memory_decision_prompt"] = DEFAULT_UPDATE_MEMORY_PROMPT
         elif self.memory_decision_mode == 1:
             from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_1
+
             config["custom_memory_decision_prompt"] = UPDATE_MEMORY_PROMPT_1
         # please modify the prompt in mem0/configs/prompts.py if you want to change the memory decision prompt
 
+        self._max_parallelism_cap = max(1, min(os.cpu_count() or 4, 6))
+        self._pbar_lock = threading.Lock()
+        self._memory_lock = threading.Lock()
+        self._memory_semaphore = threading.Semaphore(self._max_parallelism_cap)
+
         if data_path:
             self.load_data()
-        # Create the memory object first
-        self.logger = logger if logger else logging.getLogger(__name__)
+
         self.memory = Memory.from_config(config)
         # Then, set the logger attribute on the created instance
         self.memory.logger = self.logger
+        self._ensure_collection_exists()
 
     def load_data(self):
         with open(self.data_path, "r") as f:
             self.data = json.load(f)
         return self.data
 
+    @staticmethod
+    def _derive_collection_name(qdrant_path: str) -> str:
+        if not qdrant_path:
+            return "mem0"
+        workspace_name = Path(qdrant_path).resolve().parent.name
+        candidate = re.sub(r"[^0-9a-zA-Z_]+", "_", workspace_name).strip("_")
+        if not candidate:
+            candidate = "mem0"
+        if candidate[0].isdigit():
+            candidate = f"c_{candidate}"
+        return candidate[:120]
+
+    def _ensure_collection_exists(self):
+        vector_store = getattr(self.memory, "vector_store", None)
+        if not vector_store:
+            return
+        try:
+            vector_store.col_info()
+        except Exception as exc:
+            self.logger.warning(
+                "Qdrant collection '%s' unavailable. Attempting to (re)create it. Reason: %s",
+                self.collection_name,
+                exc,
+            )
+            try:
+                vector_store.create_col(
+                    vector_store.embedding_model_dims,
+                    getattr(vector_store, "on_disk", True),
+                )
+            except Exception as create_exc:
+                raise RuntimeError(
+                    f"Failed to initialize Qdrant collection '{self.collection_name}'."
+                ) from create_exc
+
+    def _resolve_max_workers(self, requested: int) -> int:
+        if requested is None or requested <= 0:
+            self.logger.warning("Received invalid max_workers=%s. Falling back to 1.", requested)
+            return 1
+        resolved = min(requested, self._max_parallelism_cap)
+        if resolved != requested:
+            self.logger.info(
+                "Capping max_workers from %s to %s to respect parallelism limits and avoid rate limits.",
+                requested,
+                resolved,
+            )
+        return resolved
+
     def add_memory(self, user_id, message, metadata, retries=2):
         request_id = f"add-mem-{uuid.uuid4()}"
-        _ = self.memory.add( message, user_id=user_id, metadata=metadata, fact_extraction_mode=self.fact_extraction_mode, memory_decision_mode=self.memory_decision_mode)
-        return
+        max_attempts = retries + 1
 
-        # for attempt in range(retries):
-        #     try:
-        #         _ = self.memory.add(
-        #             message, user_id=user_id, metadata=metadata
-        #         )
-        #         return
-        #     except Exception as e:
-        #         if attempt < retries - 1:
-        #             self.logger.warning(f"Request ID [{request_id}] - Retrying...{attempt+1}/{retries}\t{str(e)}")
-        #             continue
-        #         else:
-        #             self.logger.error(f"Request ID [{request_id}] - Failed to add memory after retries.", str(e))
-        #             raise e
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with self._memory_semaphore:
+                    self.memory.add(
+                        message,
+                        user_id=user_id,
+                        metadata=metadata,
+                        fact_extraction_mode=self.fact_extraction_mode,
+                        memory_decision_mode=self.memory_decision_mode,
+                    )
+                return
+            except Exception as exc:
+                if attempt < max_attempts:
+                    sleep_time = random.uniform(1, 3)
+                    self.logger.warning(
+                        "Request ID [%s] - Memory add failed (attempt %s/%s). Retrying in %.2fs. Error: %s",
+                        request_id,
+                        attempt,
+                        max_attempts,
+                        sleep_time,
+                        exc,
+                    )
+                    time.sleep(sleep_time)
+                    continue
 
-    def add_memories_for_speaker(self, speaker, messages, timestamp, desc, pbar=None):
-        # for i in range(0, len(messages), self.batch_size):
-        for i in tqdm(range(0, len(messages), self.batch_size), desc=desc):
+                self.logger.error(
+                    "Request ID [%s] - Failed to add memory after %s attempts. Error: %s",
+                    request_id,
+                    max_attempts,
+                    exc,
+                )
+                raise
+
+    def add_memories_for_speaker(self, speaker, messages, timestamp, message_pbar=None):
+        for i in range(0, len(messages), self.batch_size):
             batch_messages = messages[i : i + self.batch_size]
             self.add_memory(speaker, batch_messages, metadata={"timestamp": timestamp})
-            if pbar:
-                pbar.update(1)
+            if message_pbar:
+                with self._pbar_lock:
+                    message_pbar.update(self.batch_size/2)
 
-    def process_conversation(self, item, idx, pbar=None):
+    def process_conversation(self, item, idx, session_pbar=None, message_pbar=None):
 
         max_retries = 2  # 定义最大重试次数 (总共尝试 1 + 2 = 3 次)
 
@@ -181,14 +266,27 @@ class MemoryADD:
                 speaker_a_user_id = f"{speaker_a}_{idx}"
                 speaker_b_user_id = f"{speaker_b}_{idx}"
 
-                # delete all memories for the two users
-                self.memory.delete_all(user_id=speaker_a_user_id)
-                self.memory.delete_all(user_id=speaker_b_user_id)
+                # delete all memories for the two users (使用锁确保线程安全)
+                with self._memory_lock:
+                    self.memory.delete_all(user_id=speaker_a_user_id)
+                    self.memory.delete_all(user_id=speaker_b_user_id)
 
-                for key in conversation.keys():
-                    if key in ["speaker_a", "speaker_b"] or "date" in key or "timestamp" in key:
-                        continue
+                session_keys = [
+                    key
+                    for key in conversation.keys()
+                    if key.startswith("session_") and not key.endswith("_date_time")
+                ]
+                total_session_count = len(session_keys)
+                total_dialogue_count = sum(
+                    len(conversation.get(key, []))
+                    if isinstance(conversation.get(key, []), list)
+                    else 0
+                    for key in session_keys
+                )
+                sessions_processed = 0
+                dialogues_processed = 0
 
+                for key in session_keys:
                     date_time_key = key + "_date_time"
                     timestamp = conversation[date_time_key]
                     chats = conversation[key]
@@ -209,38 +307,43 @@ class MemoryADD:
                         else:
                             raise ValueError(f"Unknown speaker: {chat['speaker']}")
 
-                    # add memories for the two users on different threads
-                    # thread_a = threading.Thread(
-                    #     target=self.add_memories_for_speaker,
-                    #     args=(speaker_a_user_id, messages, timestamp, "Adding Memories for Speaker A", pbar),
-                    # )
-                    # thread_b = threading.Thread(
-                    #     target=self.add_memories_for_speaker,
-                    #     args=(speaker_b_user_id, messages_reverse, timestamp, "Adding Memories for Speaker B", pbar),
-                    # )
+                    self.add_memories_for_speaker(speaker_a_user_id, messages, timestamp, message_pbar)
+                    self.add_memories_for_speaker(speaker_b_user_id, messages_reverse, timestamp, message_pbar)
 
-                    # thread_a.start()
-                    # thread_b.start()
-                    # thread_a.join()
-                    # thread_b.join()
-                
-                    self.add_memories_for_speaker(speaker_a_user_id, messages, timestamp, "Adding Memories for Speaker A", pbar)
-                    self.add_memories_for_speaker(speaker_b_user_id, messages_reverse, timestamp, "Adding Memories for Speaker B", pbar)
-                # --- 如果代码成功执行到这里，说明没有错误 ---
+                    sessions_processed += 1
+                    dialogues_processed += len(chats)
+                    if session_pbar:
+                        with self._pbar_lock:
+                            session_pbar.update(1)
+                    
+
                 self.logger.info(f"Conversation {idx} processed successfully on attempt {attempt + 1}.")
                 return  # 成功后直接退出函数，不再重试
 
             except Exception as e:
                 # --- 如果 try 块中任何地方发生错误，都会进入这里 ---
+                error_details = traceback.format_exc()
                 self.logger.warning(f"An error occurred on attempt {attempt + 1}/{max_retries + 1} for conversation {idx}. Error: {e}")
+                self.logger.warning(f"Full error traceback: {error_details}")
                 
                 if attempt < max_retries:
                     # 如果还未达到最大重试次数，则等待一小段时间后重试
                     self.logger.info(f"Retrying conversation {idx}...")
-                    time.sleep(1)  # 等待1秒，避免因瞬时问题立即重试导致连续失败
+                    time.sleep(random.uniform(1, 3))  # 随机等待1-3秒，避免同时重试
                 else:
                     # 如果已经达到最大重试次数，记录严重错误并放弃
                     self.logger.error(f"Failed to process conversation {idx} after {max_retries + 1} attempts.")
+                    self.logger.error(f"Final error details: {error_details}")
+                    if session_pbar:
+                        remaining_sessions = total_session_count - sessions_processed
+                        if remaining_sessions > 0:
+                            with self._pbar_lock:
+                                session_pbar.update(remaining_sessions)
+                    if message_pbar:
+                        remaining_dialogues = total_dialogue_count - dialogues_processed
+                        if remaining_dialogues > 0:
+                            with self._pbar_lock:
+                                message_pbar.update(remaining_dialogues)
                     # 这里可以选择是抛出异常让整个程序停止，还是仅仅跳过这个item
                     # raise e # 如果希望程序停止，取消这一行的注释
                     return # 如果希望仅仅跳过这个失败的item，保留这行
@@ -258,45 +361,49 @@ class MemoryADD:
     def process_all_conversations(self, max_workers=10):
         if not self.data:
             raise ValueError("No data loaded. Please set data_path and call load_data() first.")
-        total_batches = 0
-        for item in self.data:
-            conversation = item["conversation"]
-            for key in conversation.keys():
-                if key in ["speaker_a", "speaker_b"] or "date" in key or "timestamp" in key:
-                    continue
-                
-                num_messages = len(conversation[key])
-                # 每个对话轮次，A和B都要处理一次，所以计算两次
-                batches_for_speaker_a = math.ceil(num_messages / self.batch_size)
-                batches_for_speaker_b = math.ceil(num_messages / self.batch_size)
-                total_batches += batches_for_speaker_a + batches_for_speaker_b
-        
-        print(f"--- 预计总共需要处理 {total_batches} 个批次 ---")
 
-        print("🔧 Pre-initializing vector store collection...")
-        try:
-            # 执行一个临时的、无害的操作来触发 collection 的创建
-            init_user_id = f"system_init_{uuid.uuid4()}"
-            self.memory.add("init", user_id=init_user_id)
-            self.memory.delete_all(user_id=init_user_id)
-            print("✅ Collection pre-initialization successful.")
-        except Exception as e:
-            print(f"🔥 Error during pre-initialization, this might be okay if collection already exists: {e}")
-            pass
+        total_conversations = len(self.data)
+        total_sessions = 0
+        total_dialogues = 0
+        for item in self.data:
+            conversation = item.get("conversation", {})
+            session_keys = [
+                key for key in conversation.keys() if key.startswith("session_") and not key.endswith("_date_time")
+            ]
+            total_sessions += len(session_keys)
+            for key in session_keys:
+                chats = conversation.get(key, [])
+                if isinstance(chats, list):
+                    total_dialogues += len(chats)
+
+        resolved_workers = self._resolve_max_workers(max_workers)
+        print(f"--- 总共需要处理 {total_conversations} 组对话 ---")
+        if total_sessions:
+            print(f"--- 覆盖 {total_sessions} 个会话，{total_dialogues} 条对话 ---")
+        if resolved_workers != max_workers:
+            print(f"⚙️ 调整 max_workers: 从 {max_workers} -> {resolved_workers}")
+        else:
+            print(f"⚙️ 使用 max_workers = {resolved_workers}")
 
         successful_count = 0
         failed_count = 0
-        
-        with tqdm(total=total_batches, desc="💡Total Batch Progress") as pbar:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # futures = {
-                #     executor.submit(self.process_conversation, item, idx, pbar): f"Conversation {idx}" 
-                #     for idx, item in enumerate(self.data)
-                # }
-                futures = {}
-                for idx, item in enumerate(self.data):
-                    futures[executor.submit(self.process_conversation, item, idx, pbar)] = f"Conversation {idx}"
-                    time.sleep(2 / (idx + 1))
+
+        conversation_pbar = tqdm(total=total_conversations, desc="📦 Conversation Groups")
+        session_pbar = (
+            tqdm(total=total_sessions, desc="🧵 Session Progress", position=1, leave=False) if total_sessions else None
+        )
+        message_pbar = (
+            tqdm(total=total_dialogues, desc="🗣️ Dialogue Turns", position=2, leave=False)
+            if total_dialogues
+            else None
+        )
+
+        try:
+            with ThreadPoolExecutor(max_workers=resolved_workers) as executor:
+                futures = {
+                    executor.submit(self.process_conversation, item, idx, session_pbar, message_pbar): f"Conversation {idx}"
+                    for idx, item in enumerate(self.data)
+                }
 
                 for future in as_completed(futures):
                     conversation_id = futures[future]
@@ -304,8 +411,19 @@ class MemoryADD:
                         future.result()
                         successful_count += 1
                     except Exception as e:
+                        error_details = traceback.format_exc()
                         failed_count += 1
-                        pbar.write(f"\n---[retry{failed_count}] ❌ Error processing {conversation_id}: {e} ---\n")
-                        # time.sleep(random.randint(5, 10))
+                        conversation_pbar.write(
+                            f"\n---[Error {failed_count}] ❌ Error processing {conversation_id}: {str(e)} ---\n"
+                        )
+                        conversation_pbar.write(f"{error_details}\n")
+                    finally:
+                        conversation_pbar.update(1)
+        finally:
+            conversation_pbar.close()
+            if session_pbar:
+                session_pbar.close()
+            if message_pbar:
+                message_pbar.close()
 
         print(f"\n✅ All conversations processed. Success: {successful_count}, Failed: {failed_count}")

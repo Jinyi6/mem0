@@ -1,10 +1,9 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo10_failed_6",
-    "existing_workspace_dir": "./exp_data/locomo10_failed_6/locomo10_failed_6_top_k_30_filter_False_graph_False_3_1_0_20251013_131408",
+    "dataset_name": "locomo1_failed_half",
+    "existing_workspace_dir": "",
     "existing_workspace_dir_example": "./exp_data/locomo10_failed/locomo10_failed_top_k_100_filter_False_graph_False_20250928_224809"
-
   },
   "exp_params": {
     "technique_type": "mem0",
@@ -17,9 +16,15 @@
     "fact_extraction_mode": "3",
     "search_mode": "5",
     "memory_decision_mode": "1",
-    "answer_mode": "4"
+    "answer_mode": "5"
   },
   "eval_params": {
-    "max_workers": 10
+    "max_workers": 5
+  },
+  "add_params": {
+    "max_workers": 4
+  },
+  "search_params": {
+    "max_workers": 6
   }
 }

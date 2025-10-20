@@ -233,8 +233,8 @@ def evaluate_llm_judge(question, gold_answer, generated_answer):
                 print(f"   -> Rate limit error detected. Waiting for {sleep_duration}s... (Attempt {retries}/{max_retries})")
                 time.sleep(sleep_duration)
             else:
-                sleep_duration = 1
-                print(f"   -> Other error detected. Retrying in {sleep_duration}s... (Attempt {retries}/{max_retries})")
+                sleep_duration = random.uniform(0.5, 1)  # 减少其他错误等待时间
+                print(f"   -> Other error detected. Retrying in {sleep_duration:.1f}s... (Attempt {retries}/{max_retries})")
                 time.sleep(sleep_duration)
     
     print(f"❌ Exhausted all retries for question: {question}")

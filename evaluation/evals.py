@@ -17,6 +17,7 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["MEM0_TELEMETRY"] = "False"
 
 from metrics.llm_judge import evaluate_llm_judge
+from utils.result_merger import merge_memory_and_scores, save_json_file
 # from metrics.utils import calculate_metrics
 
 # --- 需求 3: 将原始 for 循环中的逻辑提取为独立的函数 ---
@@ -26,6 +27,8 @@ def process_single_item(item):
     """
     gt_answer = str(item["answer"])
     pred_answer = str(item["response"])
+    if "Final Answer:" in pred_answer:
+        pred_answer = pred_answer.split("Final Answer:", 1)[1].strip()
     category = str(item["category"])
     question = str(item["question"])
 
@@ -58,6 +61,12 @@ def main():
         "--output_file", type=str, required=True, help="Path to save the evaluation results JSON file."
     )
     parser.add_argument("--max_workers", type=int, default=5, help="Maximum number of worker threads")
+    parser.add_argument(
+        "--combined_output_file",
+        type=str,
+        default=None,
+        help="Optional path for the merged (memories + scores) JSON output. Defaults to <output_file>_combined.json",
+    )
 
     args = parser.parse_args()
 
@@ -68,35 +77,49 @@ def main():
     
     results = defaultdict(list)
 
-    # --- 需求 1: 外层循环串行，并添加进度条 ---
-    # tqdm 的外层描述设为 "Processing Keys"
-    for key, items_to_process in tqdm(data.items(), desc="Processing Keys"):
-        
-        processed_items = []
-        # --- 需求 2: 在处理某一组数据时，并行处理其内部所有 data_item ---
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-            # 提交所有任务
-            futures = [executor.submit(process_single_item, item) for item in items_to_process]
-            
-            # 使用 tqdm 显示内部处理进度
-            # leave=False 表示这个内层进度条在完成后会消失，避免刷屏
-            progress_desc = f"Processing items in '{key}'"
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc=progress_desc, leave=False):
-                try:
-                    result = future.result()
-                    # 只有当任务成功返回有效结果时才添加
-                    if result is not None:
-                        processed_items.append(result)
-                except Exception as e:
-                    print(f"处理 '{key}' 中的一个项目时发生错误: {e}")
+    total_keys = len(data)
+    with tqdm(total=total_keys, desc="Processing Keys") as key_pbar:
+        for key, items_to_process in data.items():
+            processed_items = []
 
-        results[key] = processed_items
+            with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+                futures = [executor.submit(process_single_item, item) for item in items_to_process]
+
+                progress_desc = f"Processing items in '{key}'"
+                inner_total = len(futures)
+                disable_inner = inner_total <= 1
+                with tqdm(total=inner_total, desc=progress_desc, leave=False, disable=disable_inner) as inner_pbar:
+                    for future in concurrent.futures.as_completed(futures):
+                        try:
+                            result = future.result()
+                            if result is not None:
+                                processed_items.append(result)
+                        except Exception as e:
+                            print(f"处理 '{key}' 中的一个项目时发生错误: {e}")
+                        finally:
+                            if not disable_inner:
+                                inner_pbar.update(1)
+
+            results[key] = processed_items
+            key_pbar.update(1)
 
     # 将结果保存到JSON文件
+    results_dict = {str(k): v for k, v in results.items()}
     with open(args.output_file, "w") as f:
-        json.dump(results, f, indent=4)
+        json.dump(results_dict, f, indent=4)
+
+    # --- 生成合并后的完整结果文件 ---
+    combined_path = (
+        args.combined_output_file
+        if args.combined_output_file
+        else f"{os.path.splitext(args.output_file)[0]}_combined.json"
+    )
+    print("评估完成，正在合并评估结果...")
+    combined_results = merge_memory_and_scores(data, results_dict)
+    save_json_file(combined_path, combined_results)
 
     print(f"\n所有处理完成！结果已保存到 {args.output_file}")
+    print(f"合并后的完整结果文件已保存到 {combined_path}")
 
 
 if __name__ == "__main__":

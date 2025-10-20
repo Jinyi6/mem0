@@ -1,15 +1,15 @@
 # ./run_pipeline.py
 
+import argparse
 import json
 import os
-import subprocess
-import argparse
+import re
 import shutil
-from datetime import datetime
+import subprocess
 import sys
-import argparse
-import json
 from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
 
 os.environ["LOCAL_MEM0_PATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # os.environ["LOCAL_MEM0_PATH"] = "/Users/jinyi/Documents/code/memory/mem0" # 也可以定义成绝对路径
@@ -20,13 +20,25 @@ os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["MEM0_TELEMETRY"] = "False"
 
+
+def sanitize_collection_name(name: str) -> str:
+    """
+    Convert an arbitrary workspace name into a Qdrant collection name that is
+    stable across runs and safe for concurrent experiments.
+    """
+    if not name:
+        return "mem0"
+    sanitized = re.sub(r"[^0-9a-zA-Z_]+", "_", name).strip("_")
+    if not sanitized:
+        sanitized = "mem0"
+    if sanitized[0].isdigit():
+        sanitized = f"c_{sanitized}"
+    # Qdrant allows collection names up to 255 chars, but keep ours shorter.
+    return sanitized[:120]
+
 import subprocess
 import sys
 import os
-
-# 在 run_pipeline.py 中
-import os
-import subprocess
 
 def save_git_state(workspace_dir, reference_point="origin/main"):
     """
@@ -256,6 +268,11 @@ def main():
 
     # 3. Define all file paths within the workspace
     qdrant_path = os.path.join(workspace_dir, "qdrant_data")
+    os.makedirs(qdrant_path, exist_ok=True)
+    collection_name = sanitize_collection_name(Path(workspace_dir).name)
+    mem0_state_dir = os.path.join(workspace_dir, ".mem0_state")
+    os.makedirs(mem0_state_dir, exist_ok=True)
+    os.environ["MEM0_DIR"] = mem0_state_dir
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     search_results_filename = (
         f"mem0_{setup_params['dataset_name']}_results_top_{exp_params['top_k']}_"
@@ -274,6 +291,10 @@ def main():
     
     if args.start_from_step <= 1 and exp_params['technique_type'] not in ["full_context", "openai"]:
         print("\n" + "#"*25 + " STEP 1: ADD MEMORIES " + "#"*25, flush=True)
+        add_max_workers = (
+            config.get("add_params", {}).get("max_workers")
+            or exp_params.get("max_workers", 4)
+        )
         add_command = [
             "python", "-u", "./run_experiments.py",
             "--method", "add",
@@ -285,6 +306,8 @@ def main():
             "--workspace_dir", workspace_dir,
             "--fact_extraction_mode", exp_params.get("fact_extraction_mode", "0"),
             "--memory_decision_mode", exp_params.get("memory_decision_mode", "0"),
+            "--max_workers", str(add_max_workers),
+            "--collection_name", collection_name,
         ]
         if exp_params.get("figure_view", False): add_command.append("--figure_view")
         if exp_params.get("is_graph", False): add_command.append("--is_graph")
@@ -295,6 +318,10 @@ def main():
 
     if args.start_from_step <= 2:
         print("\n" + "#"*25 + " STEP 2: SEARCH MEMORIES " + "#"*25, flush=True)
+        search_max_workers = (
+            config.get("search_params", {}).get("max_workers")
+            or exp_params.get("max_workers", 6)
+        )
         search_command = [
             "python", "-u", "./run_experiments.py",
             "--method", "search",
@@ -307,7 +334,9 @@ def main():
             "--qdrant_path", qdrant_path,
             "--workspace_dir", workspace_dir,
             "--search_mode", exp_params.get("search_mode", "0"),
-            "--answer_mode", exp_params.get("answer_mode", "0"), 
+            "--answer_mode", exp_params.get("answer_mode", "0"),
+            "--max_workers", str(search_max_workers),
+            "--collection_name", collection_name,
         ]
         if exp_params.get("filter_memories", False): search_command.append("--filter_memories")
         if exp_params.get("is_graph", False): search_command.append("--is_graph")

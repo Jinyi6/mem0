@@ -214,7 +214,10 @@ Status: {status}
                     try:
                         future.result()
                     except Exception as e:
+                        import traceback
+                        error_details = traceback.format_exc()
                         self.logger.error(f"A task failed in the thread pool: {e}")
+                        self.logger.error(f"Full error traceback: {error_details}")
 
         # --- THIS IS THE CORRECT PLACE TO SAVE THE FILE ---
         # All threads are done, now write the final result to the file once.

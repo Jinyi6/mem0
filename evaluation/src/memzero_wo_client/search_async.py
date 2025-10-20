@@ -1,18 +1,21 @@
 import json
+import logging
 import os
+import random
+import re
+import threading
 import time
+import traceback
+import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-import logging
-import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
 from jinja2 import Template
 from openai import OpenAI
 from prompts import ANSWER_PROMPT, ANSWER_PROMPT_GRAPH
 from tqdm import tqdm
-import random 
 from mem0 import Memory
 
 load_dotenv()
@@ -111,7 +114,22 @@ class MemorySearch:
     - 方法5: 关键词提取 + PRF扩展 + Reranking + MMR多样化
     """
     
-    def __init__(self, output_path="results.json", top_k=10, filter_memories=False, is_graph=False, logger=None, qdrant_path=None, search_method=5, answer_mode=0):
+    def __init__(
+        self,
+        output_path="results.json",
+        top_k=10,
+        filter_memories=False,
+        is_graph=False,
+        logger=None,
+        qdrant_path=None,
+        search_method=5,
+        answer_mode=0,
+        collection_name=None,
+    ):
+        qdrant_path = qdrant_path or "./qdrant_data/tmp"
+        os.makedirs(qdrant_path, exist_ok=True)
+        self.logger = logger if logger else logging.getLogger(__name__)
+        self.collection_name = collection_name or self._derive_collection_name(qdrant_path)
         config = {
             "llm": {
                 "provider": "openai",
@@ -120,22 +138,23 @@ class MemorySearch:
                     "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
                     "temperature": 0.1,
                     "max_tokens": 2000,
-                }
+                },
             },
             "embedder": {
                 "provider": "openai",
                 "config": {
                     "model": "BAAI/bge-m3",
                     "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
-                }
+                },
             },
             "vector_store": {
                 "provider": "qdrant",
                 "config": {
                     "path": qdrant_path,
                     "on_disk": True,
-                    "embedding_model_dims": 1024
-                }
+                    "embedding_model_dims": 1024,
+                    "collection_name": self.collection_name,
+                },
             },
             "version": "v1.1",
         }
@@ -143,15 +162,21 @@ class MemorySearch:
         self.openai_client = OpenAI()
         self.results = defaultdict(list)
         self.output_path = output_path
-        self.logger = logger if logger else logging.getLogger(__name__)
         self.filter_memories = filter_memories
         self.is_graph = is_graph
-        self.lock = None
+        self.lock = threading.Lock()
         self.search_method = int(search_method)
-        # Create the memory object first
+        self.qdrant_path = qdrant_path
+        self._max_parallelism_cap = max(1, min(os.cpu_count() or 4, 6))
+        self.logger.info(
+            "Using Qdrant path '%s' with collection '%s' for search reads.",
+            self.qdrant_path,
+            self.collection_name,
+        )
+
         self.memory = Memory.from_config(config)
-        # Then, set the logger attribute on the created instance
-        self.memory.logger = self.logger        # self.lock = threading.Lock()
+        self.memory.logger = self.logger
+        self._ensure_collection_exists()
 
         self.keybert_model = get_keybert_model() 
         self.reranker_model = get_reranker_model()
@@ -173,8 +198,60 @@ class MemorySearch:
             elif  answer_mode == 4:
                 from prompts import ANSWER_PROMPT_4
                 self.ANSWER_PROMPT = ANSWER_PROMPT_4
+            elif  answer_mode == 5:
+                from prompts import ANSWER_PROMPT_5
+                self.ANSWER_PROMPT = ANSWER_PROMPT_5
+            elif answer_mode == 6:
+                from prompts import ANSWER_PROMPT_6
+                self.ANSWER_PROMPT = ANSWER_PROMPT_6
             
-            
+    @staticmethod
+    def _derive_collection_name(qdrant_path: str) -> str:
+        if not qdrant_path:
+            return "mem0"
+        workspace_name = Path(qdrant_path).resolve().parent.name
+        candidate = re.sub(r"[^0-9a-zA-Z_]+", "_", workspace_name).strip("_")
+        if not candidate:
+            candidate = "mem0"
+        if candidate[0].isdigit():
+            candidate = f"c_{candidate}"
+        return candidate[:120]
+
+    def _ensure_collection_exists(self):
+        vector_store = getattr(self.memory, "vector_store", None)
+        if not vector_store:
+            return
+        try:
+            vector_store.col_info()
+        except Exception as exc:
+            self.logger.warning(
+                "Qdrant collection '%s' not found for search. Attempting to recreate it. Reason: %s",
+                self.collection_name,
+                exc,
+            )
+            try:
+                vector_store.create_col(
+                    vector_store.embedding_model_dims,
+                    getattr(vector_store, "on_disk", True),
+                )
+            except Exception as create_exc:
+                raise RuntimeError(
+                    f"Failed to ensure Qdrant collection '{self.collection_name}' exists for search."
+                ) from create_exc
+
+    def _resolve_max_workers(self, requested: int) -> int:
+        if requested is None or requested <= 0:
+            self.logger.warning("Received invalid max_workers=%s. Falling back to 1.", requested)
+            return 1
+        resolved = min(requested, self._max_parallelism_cap)
+        if resolved != requested:
+            self.logger.info(
+                "Capping search max_workers from %s to %s to stay within safe parallelism limits.",
+                requested,
+                resolved,
+            )
+        return resolved
+
 
     def search_memory(self, user_id, query, max_retries=5, pbar=None):
         """
@@ -200,11 +277,30 @@ class MemorySearch:
                 )
                 break
             except Exception as e:
-                self.logger.warning(f"Retrying search for user {user_id}...{retries+1}/{max_retries}\tError: {str(e)}")
                 retries += 1
+                error_message = str(e)
+                error_lower = error_message.lower()
+                if "collection" in error_lower and "not found" in error_lower:
+                    self.logger.warning(
+                        "Search collection missing for user %s (attempt %s/%s). Recreating and retrying. Error: %s",
+                        user_id,
+                        retries,
+                        max_retries,
+                        error_message,
+                    )
+                    self._ensure_collection_exists()
+                    continue
+
+                self.logger.warning(
+                    "Retrying search for user %s...%s/%s\tError: %s",
+                    user_id,
+                    retries,
+                    max_retries,
+                    error_message,
+                )
                 if retries >= max_retries:
-                    raise e
-                time.sleep(random.randint(1, 3))
+                    raise
+                time.sleep(random.uniform(0.5, 2))  # 减少重试延迟
 
         end_time = time.time()
 
@@ -298,7 +394,7 @@ Status: {status}
         if search_method == 3:
             # ========== 方法3: 问题分解 + 多查询搜索 + Reranking ==========
             NUM_SUB_QUESTIONS = 5  # 子问题数量
-            MAX_WORKERS = 3  # 并发工作线程数
+            MAX_WORKERS = min(3, self._max_parallelism_cap)  # 并发工作线程数
             
             question_list = []
             question_list.append(question)
@@ -376,7 +472,7 @@ Status: {status}
                     if a_mem_map:
                         a_candidates = list(a_mem_map.values())
                         a_pairs = [[question, m["memory"]] for m in a_candidates]
-                        a_scores = reranker.predict(a_pairs)
+                        a_scores = reranker.predict(a_pairs, show_progress_bar=False)
                         
                         # Update scores with reranker scores
                         for i, mem in enumerate(a_candidates):
@@ -391,7 +487,7 @@ Status: {status}
                     if b_mem_map:
                         b_candidates = list(b_mem_map.values())
                         b_pairs = [[question, m["memory"]] for m in b_candidates]
-                        b_scores = reranker.predict(b_pairs)
+                        b_scores = reranker.predict(b_pairs, show_progress_bar=False)
                         
                         # Update scores with reranker scores
                         for i, mem in enumerate(b_candidates):
@@ -428,7 +524,7 @@ Status: {status}
             PRF_K = 20  # PRF使用的文档数
             MAX_KEYWORDS = 5  # 基础关键词数量
             PRF_KEYWORDS = 6  # PRF关键词数量
-            MAX_WORKERS = 3  # 并发线程数
+            MAX_WORKERS = min(3, self._max_parallelism_cap)  # 并发线程数
             LAMBDA_DIV = 0.6  # MMR多样性参数
             RERANK_WEIGHT = 0.8  # 重排序分数权重
             RECENCY_WEIGHT = 0.2  # 时间衰减权重
@@ -655,7 +751,7 @@ Status: {status}
                 if reranker is not None:
                     try:
                         pairs = [[question, m.get("memory", "")] for m in cands]
-                        rerank_scores = reranker.predict(pairs)
+                        rerank_scores = reranker.predict(pairs, show_progress_bar=False)
                     except Exception as e:
                         print(f"⚠️ Reranking failed: {e}. Fallback to base score.")
                 
@@ -892,11 +988,17 @@ Status: {status}
             
         print(f"--- 预计总共需要处理 {total_questions} 个问题 ---")
 
+        resolved_workers = self._resolve_max_workers(max_workers)
+        if resolved_workers != max_workers:
+            print(f"⚙️ 调整 max_workers: 从 {max_workers} -> {resolved_workers}")
+        else:
+            print(f"⚙️ 使用 max_workers = {resolved_workers}")
+
         successful_count = 0
         failed_count = 0
         
         with tqdm(total=total_questions, desc="💡Total Questions Progress") as pbar:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            with ThreadPoolExecutor(max_workers=resolved_workers) as executor:
                 futures = {}
                 for idx, item in enumerate(data):
                     qa = item.get("qa", [])
@@ -924,7 +1026,10 @@ Status: {status}
                         future.result() 
                         successful_count += 1
                     except Exception as e:
+                        error_details = traceback.format_exc()
                         failed_count += 1
                         pbar.write(f"\n--- ❌ Error processing task '{task_id}': {e} ---\n")
+                        pbar.write(f"Full error traceback: {error_details}\n")
+                        pbar.update(1)  # 即使失败也要更新进度条
 
         print(f"\n✅ All questions processed. Success: {successful_count}, Failed: {failed_count}")
