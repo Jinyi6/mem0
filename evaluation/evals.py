@@ -11,12 +11,12 @@ sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
 # --- 环境设置 (保持不变) ---
 os.environ["LOCAL_MEM0_PATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
-os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["MEM0_TELEMETRY"] = "False"
+# os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
+# os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
+# os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+# os.environ["MEM0_TELEMETRY"] = "False"
 
-from metrics.llm_judge import evaluate_llm_judge
+from metrics.llm_judge import evaluate_llm_judge, configure_evaluator
 from utils.result_merger import merge_memory_and_scores, save_json_file
 # from metrics.utils import calculate_metrics
 
@@ -43,7 +43,7 @@ def process_single_item(item):
     return {
         "question": question,
         "answer": gt_answer,
-        "response": pred_answer,
+        "response": str(item["response"]),
         "category": category,
         # "f1_score": metrics["f1"],
         "llm_score": llm_score,
@@ -67,8 +67,17 @@ def main():
         default=None,
         help="Optional path for the merged (memories + scores) JSON output. Defaults to <output_file>_combined.json",
     )
+    parser.add_argument("--evaluator_model", type=str, default=None, help="Model name for evaluator LLM")
+    parser.add_argument("--evaluator_base_url", type=str, default=None, help="Base URL for evaluator LLM API")
+    parser.add_argument("--evaluator_api_key", type=str, default=None, help="API key for evaluator LLM provider")
 
     args = parser.parse_args()
+
+    configure_evaluator(
+        model=args.evaluator_model,
+        base_url=args.evaluator_base_url,
+        api_key=args.evaluator_api_key,
+    )
 
     with open(args.input_file, "r") as f:
         data = json.load(f)

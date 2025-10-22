@@ -15,8 +15,8 @@ os.environ["LOCAL_MEM0_PATH"] = os.path.dirname(os.path.dirname(os.path.abspath(
 # os.environ["LOCAL_MEM0_PATH"] = "/Users/jinyi/Documents/code/memory/mem0" # 也可以定义成绝对路径
 
 # Set the OpenAI API key
-os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
-os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
+# os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
+# os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["MEM0_TELEMETRY"] = "False"
 
@@ -130,6 +130,7 @@ def run_command(command):
     try:
         process = subprocess.Popen(
             command,
+            stdin=subprocess.DEVNULL, 
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -224,7 +225,48 @@ def main():
         config = json.load(f)
     setup_params = config["experiment_setup"]
     exp_params = config["exp_params"]
-    os.environ["BASE_MODEL"] = exp_params.get("base_model", "Qwen/Qwen3-14B")
+    dataset_name = setup_params.get("dataset_name", "dataset")
+    technique_type = exp_params.get("technique_type", "mem0")
+
+    def safe_param_value(key, fallback="na"):
+        """
+        Read experiment parameter `key` and coerce to a string, falling back when missing.
+        """
+        value = exp_params.get(key, fallback)
+        if value in (None, ""):
+            value = fallback
+        return str(value)
+
+    top_k_str = safe_param_value("top_k")
+    filter_memories_str = safe_param_value("filter_memories")
+    is_graph_str = safe_param_value("is_graph")
+    fact_extraction_mode_str = safe_param_value("fact_extraction_mode")
+    memory_decision_mode_str = safe_param_value("memory_decision_mode")
+    search_mode_str = safe_param_value("search_mode")
+    answer_mode_str = safe_param_value("answer_mode")
+    llm_params = exp_params.get("llm", {})
+    embedder_params = exp_params.get("embedder", {})
+    evaluator_params = exp_params.get("evaluator", {})
+
+    llm_model = llm_params.get("model") or "Qwen/Qwen3-14B"
+    llm_base_url = llm_params.get("base_url") or "https://api.siliconflow.cn/v1"
+    llm_api_key = llm_params.get("api_key") or ""
+
+    embedder_model = embedder_params.get("model") or "Pro/BAAI/bge-m3"
+    embedder_base_url = embedder_params.get("base_url") or llm_base_url
+    embedder_api_key = embedder_params.get("api_key") or llm_api_key
+
+    evaluator_model = evaluator_params.get("model") or llm_model
+    evaluator_base_url = evaluator_params.get("base_url") or llm_base_url
+    evaluator_api_key = evaluator_params.get("api_key") or llm_api_key
+
+    os.environ["BASE_MODEL"] = llm_model
+    if llm_base_url:
+        os.environ["OPENAI_BASE_URL"] = llm_base_url
+    if llm_api_key:
+        os.environ["OPENAI_API_KEY"] = llm_api_key
+    if evaluator_model:
+        os.environ["EVALUATOR_MODEL"] = evaluator_model
 
     # 2. Setup Experiment Workspace based on start_from_step
     workspace_dir = ""
@@ -233,17 +275,17 @@ def main():
         print("▶️ Starting from Step 1: A new workspace will be created.")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         exp_name = (
-            f"{setup_params['dataset_name']}_"
-            f"top_k_{exp_params['top_k']}_"
-            f"filter_{exp_params['filter_memories']}_"
-            f"graph_{exp_params['is_graph']}_"
-            f"{exp_params['fact_extraction_mode']}_"
-            f"{exp_params['memory_decision_mode']}_"
-            f"{exp_params['search_mode']}_"
-            f"{exp_params['answer_mode']}_"
+            f"{dataset_name}_"
+            f"top_k_{top_k_str}_"
+            f"filter_{filter_memories_str}_"
+            f"graph_{is_graph_str}_"
+            f"{fact_extraction_mode_str}_"
+            f"{memory_decision_mode_str}_"
+            f"{search_mode_str}_"
+            f"{answer_mode_str}_"
             f"{timestamp}"
         )
-        workspace_dir = os.path.join(setup_params['base_dir'], setup_params['dataset_name'], exp_name)
+        workspace_dir = os.path.join(setup_params['base_dir'], dataset_name, exp_name)
         os.makedirs(workspace_dir, exist_ok=True)
         shutil.copy(args.config, os.path.join(workspace_dir, "config.json"))
         print("="*80)
@@ -274,22 +316,31 @@ def main():
     os.makedirs(mem0_state_dir, exist_ok=True)
     os.environ["MEM0_DIR"] = mem0_state_dir
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    search_results_filename = (
-        f"mem0_{setup_params['dataset_name']}_results_top_{exp_params['top_k']}_"
-        f"filter_{exp_params['filter_memories']}_graph_{exp_params['is_graph']}_"
-        f"{timestamp}_{exp_params['fact_extraction_mode']}_{exp_params['memory_decision_mode']}_{exp_params['search_mode']}_{exp_params['answer_mode']}.json"
-    )
-    search_results_filenameold = (
-        f"mem0_{setup_params['dataset_name']}_results_top_{exp_params['top_k']}_"
-        f"filter_{exp_params['filter_memories']}_graph_{exp_params['is_graph']}.json"
-    )
+    if technique_type == "full_context":
+        search_results_raw_filename = f"full_context_{dataset_name}_results.json"
+        search_results_filename = f"full_context_{dataset_name}_results_{timestamp}.json"
+    else:
+        search_results_raw_filename = (
+            f"mem0_{dataset_name}_results_top_{top_k_str}_"
+            f"filter_{filter_memories_str}_graph_{is_graph_str}.json"
+        )
+        search_results_filename = (
+            f"mem0_{dataset_name}_results_top_{top_k_str}_"
+            f"filter_{filter_memories_str}_graph_{is_graph_str}_"
+            f"{timestamp}_{fact_extraction_mode_str}_{memory_decision_mode_str}_{search_mode_str}_{answer_mode_str}.json"
+        )
+    search_results_raw_path = os.path.join(workspace_dir, search_results_raw_filename)
     search_results_path = os.path.join(workspace_dir, search_results_filename)
     eval_metrics_path = os.path.join(workspace_dir, f"evaluation_metrics_{timestamp}.json")
     final_scores_path = os.path.join(workspace_dir, "final_scores.txt")
 
     # --- Execute Pipeline Steps Conditionally ---
+
+    def append_arg(command_list, flag, value):
+        if value not in (None, "", False):
+            command_list.extend([flag, value])
     
-    if args.start_from_step <= 1 and exp_params['technique_type'] not in ["full_context", "openai"]:
+    if args.start_from_step <= 1 and technique_type not in ["full_context", "openai"]:
         print("\n" + "#"*25 + " STEP 1: ADD MEMORIES " + "#"*25, flush=True)
         add_max_workers = (
             config.get("add_params", {}).get("max_workers")
@@ -298,10 +349,10 @@ def main():
         add_command = [
             "python", "-u", "./run_experiments.py",
             "--method", "add",
-            "--dataset_name", setup_params['dataset_name'],
-            "--technique_type", exp_params['technique_type'],
-            "--mode", exp_params['mode'],
-            "--embedder_model", exp_params['embedder_model'],
+            "--dataset_name", dataset_name,
+            "--technique_type", technique_type,
+            "--mode", exp_params.get("mode", "no_client_async"),
+            "--embedder_model", embedder_model,
             "--qdrant_path", qdrant_path,
             "--workspace_dir", workspace_dir,
             "--fact_extraction_mode", exp_params.get("fact_extraction_mode", "0"),
@@ -309,12 +360,17 @@ def main():
             "--max_workers", str(add_max_workers),
             "--collection_name", collection_name,
         ]
+        append_arg(add_command, "--llm_model", llm_model)
+        append_arg(add_command, "--llm_base_url", llm_base_url)
+        append_arg(add_command, "--llm_api_key", llm_api_key)
+        append_arg(add_command, "--embedder_base_url", embedder_base_url)
+        append_arg(add_command, "--embedder_api_key", embedder_api_key)
         if exp_params.get("figure_view", False): add_command.append("--figure_view")
         if exp_params.get("is_graph", False): add_command.append("--is_graph")
         run_command(add_command)
         print("✅ Step 1 completed successfully.", flush=True)
     else:
-        print("\n⏭️ Skipping Step 1: ADD MEMORIES. (Not required for '{exp_params['technique_type']}' or start_from_step > 1).", flush=True)
+        print(f"\n⏭️ Skipping Step 1: ADD MEMORIES. (Not required for '{technique_type}' or start_from_step > 1).", flush=True)
 
     if args.start_from_step <= 2:
         print("\n" + "#"*25 + " STEP 2: SEARCH MEMORIES " + "#"*25, flush=True)
@@ -325,12 +381,12 @@ def main():
         search_command = [
             "python", "-u", "./run_experiments.py",
             "--method", "search",
-            "--dataset_name", setup_params['dataset_name'],
+            "--dataset_name", dataset_name,
             "--output_folder", workspace_dir,
-            "--technique_type", exp_params['technique_type'],
-            "--mode", exp_params['mode'],
-            "--top_k", str(exp_params['top_k']),
-            "--embedder_model", exp_params['embedder_model'],
+            "--technique_type", technique_type,
+            "--mode", exp_params.get("mode", "no_client_async"),
+            "--top_k", str(exp_params.get("top_k", 0)),
+            "--embedder_model", embedder_model,
             "--qdrant_path", qdrant_path,
             "--workspace_dir", workspace_dir,
             "--search_mode", exp_params.get("search_mode", "0"),
@@ -338,14 +394,25 @@ def main():
             "--max_workers", str(search_max_workers),
             "--collection_name", collection_name,
         ]
+        append_arg(search_command, "--llm_model", llm_model)
+        append_arg(search_command, "--llm_base_url", llm_base_url)
+        append_arg(search_command, "--llm_api_key", llm_api_key)
+        append_arg(search_command, "--embedder_base_url", embedder_base_url)
+        append_arg(search_command, "--embedder_api_key", embedder_api_key)
         if exp_params.get("filter_memories", False): search_command.append("--filter_memories")
         if exp_params.get("is_graph", False): search_command.append("--is_graph")
         run_command(search_command)
-        # rename the output file to include timestamp
-        old_path = os.path.join(workspace_dir, search_results_filenameold)
-        if os.path.exists(old_path):
-            os.rename(old_path, search_results_path)
-            print(f"Renamed search results file to include timestamp:\n{search_results_path}")
+        # rename the output file to include timestamp when needed
+        if os.path.exists(search_results_raw_path):
+            if search_results_raw_path != search_results_path:
+                os.rename(search_results_raw_path, search_results_path)
+                print(f"Renamed search results file to include timestamp:\n{search_results_path}")
+            else:
+                print(f"Search results file already stored with target name:\n{search_results_path}")
+        elif os.path.exists(search_results_path):
+            print(f"Search results file located at:\n{search_results_path}")
+        else:
+            print(f"⚠️ Expected search results file not found:\n  {search_results_raw_path}")
         print("✅ Step 2 completed successfully.", flush=True)
     else:
         print("\n⏭️ Skipping Step 2: SEARCH MEMORIES.", flush=True)
@@ -358,6 +425,9 @@ def main():
             "--output_file", eval_metrics_path,
             "--max_workers", str(config['eval_params']['max_workers'])
         ]
+        append_arg(eval_command, "--evaluator_model", evaluator_model)
+        append_arg(eval_command, "--evaluator_base_url", evaluator_base_url)
+        append_arg(eval_command, "--evaluator_api_key", evaluator_api_key)
         run_command(eval_command)
         print("✅ Step 3 completed successfully.", flush=True)
     else:

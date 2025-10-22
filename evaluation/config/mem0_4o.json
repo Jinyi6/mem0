@@ -2,8 +2,7 @@
   "experiment_setup": {
     "base_dir": "exp_data",
     "dataset_name": "locomo10_2",
-    "existing_workspace_dir": "exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_6_20251020_232546",
-    "existing_workspace_dir_example": "./exp_data/locomo10_failed/locomo10_failed_top_k_100_filter_False_graph_False_20250928_224809"
+    "existing_workspace_dir": "exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_0_20251022_004002"
   },
   "exp_params": {
     "technique_type": "mem0",
@@ -17,17 +16,17 @@
     "search_mode": "5",
     "answer_mode": "0",
     "llm": {
-      "model": "Qwen/Qwen3-14B",
-      "base_url": "https://api.siliconflow.cn/v1",
+      "model": "gpt-4o",
+      "base_url": "https://openai.arnotho.com/v1",
       "api_key": ""
     },
     "embedder": {
       "model": "Pro/BAAI/bge-m3",
-      "base_url": "",
+      "base_url": "https://api.siliconflow.cn/v1",
       "api_key": ""
     },
     "evaluator": {
-      "model": "Qwen/Qwen3-14B",
+      "model": "",
       "base_url": "",
       "api_key": ""
     }

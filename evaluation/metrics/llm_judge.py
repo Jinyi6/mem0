@@ -24,7 +24,46 @@ print("="*80)
 
 from mem0.memory.utils import extract_json
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL"))
+FALLBACK_BASE_URL = "https://api.siliconflow.cn/v1"
+DEFAULT_EVALUATOR_MODEL = os.getenv("EVALUATOR_MODEL", "Qwen/Qwen3-14B")
+DEFAULT_EVALUATOR_BASE_URL = os.getenv("OPENAI_BASE_URL") or FALLBACK_BASE_URL
+DEFAULT_EVALUATOR_API_KEY = os.getenv("OPENAI_API_KEY")
+
+_evaluator_model = DEFAULT_EVALUATOR_MODEL
+_evaluator_base_url = DEFAULT_EVALUATOR_BASE_URL
+_evaluator_api_key = DEFAULT_EVALUATOR_API_KEY
+_client = None
+
+
+def _build_client():
+    client_kwargs = {}
+    if _evaluator_base_url:
+        client_kwargs["base_url"] = _evaluator_base_url
+    if _evaluator_api_key:
+        client_kwargs["api_key"] = _evaluator_api_key
+    return OpenAI(**client_kwargs)
+
+
+def get_client():
+    global _client
+    if _client is None:
+        _client = _build_client()
+    return _client
+
+
+def configure_evaluator(model=None, base_url=None, api_key=None):
+    """
+    Configure evaluator client parameters.
+    Passing None preserves the existing value.
+    """
+    global _client, _evaluator_model, _evaluator_base_url, _evaluator_api_key
+    if model:
+        _evaluator_model = model
+    if base_url is not None:
+        _evaluator_base_url = base_url or None
+    if api_key is not None:
+        _evaluator_api_key = api_key or None
+    _client = None
 
 # LOCOMO version
 
@@ -202,8 +241,8 @@ def evaluate_llm_judge(question, gold_answer, generated_answer):
     retries = 0
     while True:
         try:
-            response = client.chat.completions.create(
-                model="Qwen/Qwen3-14B",
+            response = get_client().chat.completions.create(
+                model=_evaluator_model or "Qwen/Qwen3-14B",
                 messages=[
                     {
                         "role": "user",

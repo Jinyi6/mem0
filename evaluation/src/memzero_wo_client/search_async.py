@@ -22,8 +22,10 @@ load_dotenv()
 
 # Set the OpenAI API key
 
-model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
-os.environ["MODEL"] = model_name
+DEFAULT_LLM_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
+DEFAULT_EMBEDDER_MODEL = "Pro/BAAI/bge-m3"
+DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
+os.environ["MODEL"] = DEFAULT_LLM_MODEL
 
 
 # 新增：用于 reranking 和关键词提取
@@ -125,17 +127,36 @@ class MemorySearch:
         search_method=5,
         answer_mode=0,
         collection_name=None,
+        llm_config=None,
+        embedder_config=None,
     ):
+        llm_config = llm_config or {}
+        embedder_config = embedder_config or {}
+        self.llm_model = llm_config.get("model") or DEFAULT_LLM_MODEL
+        llm_base_url = llm_config.get("base_url") or os.getenv("OPENAI_BASE_URL") or DEFAULT_BASE_URL
+        llm_api_key = llm_config.get("api_key") or os.getenv("OPENAI_API_KEY")
+
+        embedder_model = embedder_config.get("model") or DEFAULT_EMBEDDER_MODEL
+        embedder_base_url = embedder_config.get("base_url") or llm_base_url
+        embedder_api_key = embedder_config.get("api_key") or llm_api_key
+
         qdrant_path = qdrant_path or "./qdrant_data/tmp"
         os.makedirs(qdrant_path, exist_ok=True)
         self.logger = logger if logger else logging.getLogger(__name__)
         self.collection_name = collection_name or self._derive_collection_name(qdrant_path)
+        os.environ["MODEL"] = self.llm_model
+        self.embedder_model = embedder_model
+        openai_client_kwargs = {}
+        if llm_base_url:
+            openai_client_kwargs["base_url"] = llm_base_url
+        if llm_api_key:
+            openai_client_kwargs["api_key"] = llm_api_key
         config = {
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "model": model_name,
-                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
+                    "model": self.llm_model,
+                    "openai_base_url": llm_base_url,
                     "temperature": 0.1,
                     "max_tokens": 2000,
                 },
@@ -143,8 +164,8 @@ class MemorySearch:
             "embedder": {
                 "provider": "openai",
                 "config": {
-                    "model": "BAAI/bge-m3",
-                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
+                    "model": embedder_model,
+                    "openai_base_url": embedder_base_url,
                 },
             },
             "vector_store": {
@@ -158,8 +179,12 @@ class MemorySearch:
             },
             "version": "v1.1",
         }
+        if llm_api_key:
+            config["llm"]["config"]["api_key"] = llm_api_key
+        if embedder_api_key:
+            config["embedder"]["config"]["api_key"] = embedder_api_key
         self.top_k = top_k
-        self.openai_client = OpenAI()
+        self.openai_client = OpenAI(**openai_client_kwargs)
         self.results = defaultdict(list)
         self.output_path = output_path
         self.filter_memories = filter_memories
@@ -204,6 +229,9 @@ class MemorySearch:
             elif answer_mode == 6:
                 from prompts import ANSWER_PROMPT_6
                 self.ANSWER_PROMPT = ANSWER_PROMPT_6
+            elif answer_mode == 7:
+                from prompts import ANSWER_PROMPT_7
+                self.ANSWER_PROMPT = ANSWER_PROMPT_7
             
     @staticmethod
     def _derive_collection_name(qdrant_path: str) -> str:
@@ -345,7 +373,7 @@ Status: {status}
         else:
             self.logger.error(log_message)
 
-    def safe_chat(self, model, messages, temperature, sleep_time=20):
+    def safe_chat(self, model=None, messages=None, temperature=0.0, sleep_time=20):
         """
         安全的LLM调用，自动处理速率限制
         
@@ -358,10 +386,13 @@ Status: {status}
         Returns:
             LLM响应对象
         """
+        if messages is None:
+            raise ValueError("messages 必须提供。")
+        model_name = model or self.llm_model or os.getenv("MODEL", "Qwen/Qwen3-14B")
         while True:
             try:
                 return self.openai_client.chat.completions.create(
-                    model=model or os.getenv("MODEL", "Qwen/Qwen3-14B"),
+                    model=model_name,
                     messages=messages,
                     temperature=temperature,
                 )
@@ -424,7 +455,7 @@ Status: {status}
             """
 
             q_response = self.safe_chat(
-                    model=os.getenv("MODEL", "Qwen/Qwen3-14B"),
+                    model=self.llm_model,
                     messages=[{"role": "system", "content": q_prompt}],
                     temperature=0.8,
             )
@@ -859,7 +890,7 @@ Status: {status}
             try:
                 t1 = time.time()
                 response = self.openai_client.chat.completions.create(
-                    model=os.getenv("MODEL", "Qwen/Qwen3-14B"), 
+                    model=self.llm_model, 
                     messages=[{"role": "system", "content": answer_prompt}], 
                     temperature=0.0
                 )
