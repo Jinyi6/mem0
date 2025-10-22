@@ -25,11 +25,11 @@ from sentence_transformers import SentenceTransformer
 from sentence_transformers.util import pytorch_cos_sim
 
 # Download required NLTK data
-try:
-    nltk.download("punkt")
-    nltk.download("wordnet")
-except Exception as e:
-    print(f"Error downloading NLTK data: {e}")
+# try:
+#     nltk.download("punkt")
+#     nltk.download("wordnet")
+# except Exception as e:
+#     print(f"Error downloading NLTK data: {e}")
 
 # Initialize SentenceTransformer model (this will be reused)
 try:

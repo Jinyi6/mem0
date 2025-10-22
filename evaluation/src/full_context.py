@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from jinja2 import Template
 from openai import OpenAI
 from tqdm import tqdm
+from src.utils import normalize_dataset_records
 
 # --- Step 1: Define the Prompt Template for the Full Context approach ---
 # This prompt is designed to take the entire conversation history directly.
@@ -43,8 +44,8 @@ Question: {{question}}
 
 Answer:
 """
-model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
-
+DEFAULT_LLM_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
+DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
 
 class FullContextManager:
     """
@@ -52,14 +53,22 @@ class FullContextManager:
     This class reads a dataset, processes each question against its full conversation,
     and saves the LLM-generated answers.
     """
-    def __init__(self, output_path, logger=None, figure_view=False):
+    def __init__(self, output_path, logger=None, figure_view=False, llm_config=None):
         load_dotenv()
         self.output_path = output_path
-        self.openai_client = OpenAI(
-            base_url=os.getenv("OPENAI_BASE_URL"),
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        self.model_name = model_name
+        llm_config = llm_config or {}
+        llm_model = llm_config.get("model") or DEFAULT_LLM_MODEL
+        llm_base_url = llm_config.get("base_url") or os.getenv("OPENAI_BASE_URL") or DEFAULT_BASE_URL
+        llm_api_key = llm_config.get("api_key") or os.getenv("OPENAI_API_KEY")
+
+        openai_client_kwargs = {}
+        if llm_base_url:
+            openai_client_kwargs["base_url"] = llm_base_url
+        if llm_api_key:
+            openai_client_kwargs["api_key"] = llm_api_key
+        self.openai_client = OpenAI(**openai_client_kwargs)
+        os.environ["MODEL"] = llm_model
+        self.model_name = llm_model
         self.logger = logger if logger else logging.getLogger(__name__)
         self.results = defaultdict(list)
         self.lock = threading.Lock()
@@ -189,7 +198,8 @@ Status: {status}
         It uses a thread pool to handle questions in parallel.
         """
         with open(file_path, "r") as f:
-            data = json.load(f)
+            raw_data = json.load(f)
+        data = normalize_dataset_records(raw_data)
 
         total_questions = sum(len(item.get("qa", [])) for item in data)
         if total_questions == 0:

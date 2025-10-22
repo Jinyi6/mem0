@@ -12,6 +12,7 @@ import traceback
 
 from dotenv import load_dotenv
 from tqdm import tqdm
+from src.utils import normalize_dataset_records
 load_dotenv()  # Load environment variables from .env file
 LOCAL_MEM0_PATH = os.getenv("LOCAL_MEM0_PATH")
 if not LOCAL_MEM0_PATH:
@@ -32,6 +33,8 @@ from mem0 import Memory
 load_dotenv()
 
 model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
+DEFAULT_EMBEDDER_MODEL = "Pro/BAAI/bge-m3"
+DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
 
 
 
@@ -68,12 +71,35 @@ Generate personal memories that follow these guidelines:
 
 class MemoryADD:
     def __init__(self, data_path=None, batch_size=6, is_graph=False, logger=None, **kwargs):
+        llm_config = kwargs.get("llm_config") or {}
+        embedder_config = kwargs.get("embedder_config") or {}
+
+        llm_model = llm_config.get("model") or model_name
+        llm_base_url = llm_config.get("base_url") or os.getenv("OPENAI_BASE_URL") or DEFAULT_BASE_URL
+        llm_api_key = llm_config.get("api_key") or os.getenv("OPENAI_API_KEY")
+
+        legacy_embedder_model = kwargs.get("embedder_model")
+        legacy_embedder_dims = kwargs.get("embedding_dims")
+        embedder_model = embedder_config.get("model") or legacy_embedder_model or DEFAULT_EMBEDDER_MODEL
+        embedder_base_url = embedder_config.get("base_url") or llm_base_url
+        embedder_api_key = embedder_config.get("api_key") or llm_api_key
+        embedder_dims = embedder_config.get("embedding_dims")
+        if embedder_dims is None:
+            embedder_dims = legacy_embedder_dims
+        if embedder_dims is not None:
+            try:
+                embedder_dims = int(embedder_dims)
+            except (TypeError, ValueError):
+                embedder_dims = None
+
+        vector_store_dims = embedder_dims if embedder_dims is not None else 1024
+
         config = {
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "model": model_name,
-                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
+                    "model": llm_model,
+                    "openai_base_url": llm_base_url,
                     "temperature": 0.1,
                     "max_tokens": 2000,
                     # "prompts": {
@@ -84,8 +110,9 @@ class MemoryADD:
             "embedder": {
                 "provider": "openai",
                 "config": {
-                    "model": kwargs.get("embedder_model", "BAAI/bge-m3"),
-                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
+                    "model": embedder_model,
+                    "openai_base_url": embedder_base_url,
+                    "embedding_dims": embedder_dims if embedder_dims is not None else 1536,
                 },
             },
             "vector_store": {
@@ -93,11 +120,15 @@ class MemoryADD:
                 "config": {
                     "path": kwargs.get("qdrant_path", "./qdrant_data/tmp"),
                     "on_disk": True,
-                    "embedding_model_dims": 1024,
+                    "embedding_model_dims": vector_store_dims,
                 },
             },
             "version": "v1.1",
         }
+        if llm_api_key:
+            config["llm"]["config"]["api_key"] = llm_api_key
+        if embedder_api_key:
+            config["embedder"]["config"]["api_key"] = embedder_api_key
 
         self.logger = logger if logger else logging.getLogger(__name__)
         self.batch_size = batch_size
@@ -107,6 +138,7 @@ class MemoryADD:
         self.figure_view = kwargs.get("figure_view", False)
         self.fact_extraction_mode = int(kwargs.get("fact_extraction_mode", "0"))
         self.memory_decision_mode = int(kwargs.get("memory_decision_mode", "0"))
+        self.llm_model = llm_model
 
         qdrant_path = config["vector_store"]["config"]["path"]
         os.makedirs(qdrant_path, exist_ok=True)
@@ -158,7 +190,8 @@ class MemoryADD:
 
     def load_data(self):
         with open(self.data_path, "r") as f:
-            self.data = json.load(f)
+            raw_data = json.load(f)
+        self.data = normalize_dataset_records(raw_data)
         return self.data
 
     @staticmethod

@@ -12,6 +12,7 @@ from tqdm import tqdm
 import random 
 from mem0 import Memory
 import uuid
+from src.utils import normalize_dataset_records
 load_dotenv()
 
 model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
@@ -177,10 +178,11 @@ class MemorySearch:
 
     def process_data_file(self, file_path):
         with open(file_path, "r") as f:
-            data = json.load(f)
+            raw_data = json.load(f)
+        data = normalize_dataset_records(raw_data)
 
         for idx, item in tqdm(enumerate(data), total=len(data), desc="Processing conversations"):
-            qa = item["qa"]
+            qa = item.get("qa", [])
             conversation = item["conversation"]
             speaker_a = conversation["speaker_a"]
             speaker_b = conversation["speaker_b"]

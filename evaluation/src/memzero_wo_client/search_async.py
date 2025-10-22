@@ -17,13 +17,16 @@ from openai import OpenAI
 from prompts import ANSWER_PROMPT, ANSWER_PROMPT_GRAPH
 from tqdm import tqdm
 from mem0 import Memory
+from src.utils import normalize_dataset_records
 
 load_dotenv()
 
 # Set the OpenAI API key
 
-model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
-os.environ["MODEL"] = model_name
+DEFAULT_LLM_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
+DEFAULT_EMBEDDER_MODEL = "Pro/BAAI/bge-m3"
+DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
+os.environ["MODEL"] = DEFAULT_LLM_MODEL
 
 
 # 新增：用于 reranking 和关键词提取
@@ -125,17 +128,44 @@ class MemorySearch:
         search_method=5,
         answer_mode=0,
         collection_name=None,
+        llm_config=None,
+        embedder_config=None,
     ):
+        llm_config = llm_config or {}
+        embedder_config = embedder_config or {}
+        self.llm_model = llm_config.get("model") or DEFAULT_LLM_MODEL
+        llm_base_url = llm_config.get("base_url") or os.getenv("OPENAI_BASE_URL") or DEFAULT_BASE_URL
+        llm_api_key = llm_config.get("api_key") or os.getenv("OPENAI_API_KEY")
+
+        embedder_model = embedder_config.get("model") or DEFAULT_EMBEDDER_MODEL
+        embedder_base_url = embedder_config.get("base_url") or llm_base_url
+        embedder_api_key = embedder_config.get("api_key") or llm_api_key
+        embedder_dims = embedder_config.get("embedding_dims")
+        if embedder_dims is not None:
+            try:
+                embedder_dims = int(embedder_dims)
+            except (TypeError, ValueError):
+                embedder_dims = None
+
+        vector_store_dims = embedder_dims if embedder_dims is not None else 1024
+
         qdrant_path = qdrant_path or "./qdrant_data/tmp"
         os.makedirs(qdrant_path, exist_ok=True)
         self.logger = logger if logger else logging.getLogger(__name__)
         self.collection_name = collection_name or self._derive_collection_name(qdrant_path)
+        os.environ["MODEL"] = self.llm_model
+        self.embedder_model = embedder_model
+        openai_client_kwargs = {}
+        if llm_base_url:
+            openai_client_kwargs["base_url"] = llm_base_url
+        if llm_api_key:
+            openai_client_kwargs["api_key"] = llm_api_key
         config = {
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "model": model_name,
-                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
+                    "model": self.llm_model,
+                    "openai_base_url": llm_base_url,
                     "temperature": 0.1,
                     "max_tokens": 2000,
                 },
@@ -143,8 +173,9 @@ class MemorySearch:
             "embedder": {
                 "provider": "openai",
                 "config": {
-                    "model": "BAAI/bge-m3",
-                    "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
+                    "model": embedder_model,
+                    "openai_base_url": embedder_base_url,
+                    "embedding_dims": embedder_dims if embedder_dims is not None else 1536,
                 },
             },
             "vector_store": {
@@ -152,14 +183,18 @@ class MemorySearch:
                 "config": {
                     "path": qdrant_path,
                     "on_disk": True,
-                    "embedding_model_dims": 1024,
+                    "embedding_model_dims": vector_store_dims,
                     "collection_name": self.collection_name,
                 },
             },
             "version": "v1.1",
         }
+        if llm_api_key:
+            config["llm"]["config"]["api_key"] = llm_api_key
+        if embedder_api_key:
+            config["embedder"]["config"]["api_key"] = embedder_api_key
         self.top_k = top_k
-        self.openai_client = OpenAI()
+        self.openai_client = OpenAI(**openai_client_kwargs)
         self.results = defaultdict(list)
         self.output_path = output_path
         self.filter_memories = filter_memories
@@ -204,6 +239,9 @@ class MemorySearch:
             elif answer_mode == 6:
                 from prompts import ANSWER_PROMPT_6
                 self.ANSWER_PROMPT = ANSWER_PROMPT_6
+            elif answer_mode == 7:
+                from prompts import ANSWER_PROMPT_7
+                self.ANSWER_PROMPT = ANSWER_PROMPT_7
             
     @staticmethod
     def _derive_collection_name(qdrant_path: str) -> str:
@@ -267,8 +305,11 @@ class MemorySearch:
             tuple: (semantic_memories, graph_memories, search_time)
         """
         start_time = time.time()
+        sleep_penalty = 0.0
+        attempts = 0
         retries = 0
         while retries < max_retries:
+            attempts += 1
             try:
                 memories = self.memory.search(
                     query,
@@ -300,9 +341,20 @@ class MemorySearch:
                 )
                 if retries >= max_retries:
                     raise
-                time.sleep(random.uniform(0.5, 2))  # 减少重试延迟
+                backoff = random.uniform(0.5, 2)
+                sleep_penalty += backoff
+                time.sleep(backoff)  # 减少重试延迟
 
         end_time = time.time()
+
+        search_duration = max(0.0, end_time - start_time - sleep_penalty)
+        self.logger.info(
+            "Search success for user %s in %.2fs (attempts=%d, retry_sleep_skipped=%.2fs)",
+            user_id,
+            search_duration,
+            attempts,
+            sleep_penalty,
+        )
 
         semantic_memories = [
             {
@@ -314,7 +366,7 @@ class MemorySearch:
         ]
         graph_memories = None
 
-        return semantic_memories, graph_memories, end_time - start_time
+        return semantic_memories, graph_memories, search_duration
     
     def _log_llm_call(self, request_id, attempt, max_retries, prompt_components, full_prompt, response_content, status):
         """
@@ -345,7 +397,7 @@ Status: {status}
         else:
             self.logger.error(log_message)
 
-    def safe_chat(self, model, messages, temperature, sleep_time=20):
+    def safe_chat(self, model=None, messages=None, temperature=0.0, sleep_time=20):
         """
         安全的LLM调用，自动处理速率限制
         
@@ -358,10 +410,13 @@ Status: {status}
         Returns:
             LLM响应对象
         """
+        if messages is None:
+            raise ValueError("messages 必须提供。")
+        model_name = model or self.llm_model or os.getenv("MODEL", "Qwen/Qwen3-14B")
         while True:
             try:
                 return self.openai_client.chat.completions.create(
-                    model=model or os.getenv("MODEL", "Qwen/Qwen3-14B"),
+                    model=model_name,
                     messages=messages,
                     temperature=temperature,
                 )
@@ -424,7 +479,7 @@ Status: {status}
             """
 
             q_response = self.safe_chat(
-                    model=os.getenv("MODEL", "Qwen/Qwen3-14B"),
+                    model=self.llm_model,
                     messages=[{"role": "system", "content": q_prompt}],
                     temperature=0.8,
             )
@@ -855,18 +910,27 @@ Status: {status}
         llm_error_retries = 0
         other_error_retries = 0
         MAX_OTHER_ERROR_RETRIES = 6
+        answer_start = time.time()
+        answer_sleep_penalty = 0.0
+        answer_attempts = 0
         while True:
             try:
-                t1 = time.time()
+                answer_attempts += 1
                 response = self.openai_client.chat.completions.create(
-                    model=os.getenv("MODEL", "Qwen/Qwen3-14B"), 
+                    model=self.llm_model, 
                     messages=[{"role": "system", "content": answer_prompt}], 
                     temperature=0.0
                 )
-                t2 = time.time()
-                response_time = t2 - t1
                 response_content = response.choices[0].message.content
-                self._log_llm_call(request_id, llm_error_retries+other_error_retries, max_retries, prompt_components, answer_prompt, response_content, "Success")
+                self._log_llm_call(
+                    request_id,
+                    llm_error_retries + other_error_retries,
+                    max_retries,
+                    prompt_components,
+                    answer_prompt,
+                    response_content,
+                    "Success",
+                )
                 break 
             except Exception as e:
                 error_str = str(e).lower()
@@ -875,6 +939,7 @@ Status: {status}
                     llm_error_retries += 1
                     other_error_retries = 0 # 重置其他错误计数
                     sleep_duration = random.uniform(2, 20) + 5 * llm_error_retries
+                    answer_sleep_penalty += sleep_duration
                     error_message = f"LLM Rate Limit related Error. Retrying in {sleep_duration:.2f}s... Error: {e}"
                     self._log_llm_call(request_id, llm_error_retries, max_retries, prompt_components, answer_prompt, error_message, "Failed Attempt (Rate Limit)")
                     time.sleep(sleep_duration)
@@ -890,6 +955,15 @@ Status: {status}
                     self._log_llm_call(request_id, other_error_retries, max_retries, prompt_components, answer_prompt, error_message, "Failed Attempt (Other Error)")
                     self.logger.warning(error_message)
                     
+        response_time = max(0.0, time.time() - answer_start - answer_sleep_penalty)
+        self.logger.info(
+            "Answer generated for request %s in %.2fs (attempts=%d, retry_sleep_skipped=%.2fs)",
+            request_id,
+            response_time,
+            answer_attempts,
+            answer_sleep_penalty,
+        )
+
         return (    
             response_content,
             search_1_memory,  
@@ -919,6 +993,7 @@ Status: {status}
         """
         question = val.get("question", "")
         answer = val.get("answer", "")
+        answer_fixed = val.get("answer_fixed", "")
         category = val.get("category", -1)
         evidence = val.get("evidence", [])
         adversarial_answer = val.get("adversarial_answer", "")
@@ -938,6 +1013,7 @@ Status: {status}
         result = {
             "question": question,
             "answer": answer,
+            "answer_fixed": answer_fixed,
             "category": category,
             "evidence": evidence,
             "response": response,
@@ -979,7 +1055,8 @@ Status: {status}
             max_workers: 最大并发工作线程数
         """
         with open(file_path, "r") as f:
-            data = json.load(f)
+            raw_data = json.load(f)
+        data = normalize_dataset_records(raw_data)
 
         total_questions = sum(len(item.get("qa", [])) for item in data)
         if total_questions == 0:

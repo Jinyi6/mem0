@@ -370,6 +370,15 @@ Status: {status}
                 )
             return returned_memories
 
+        fact_extraction_duration = 0.0
+        fact_extraction_sleep_total = 0.0
+        fact_extraction_attempts = 0
+        memory_decision_duration = 0.0
+        memory_decision_sleep_total = 0.0
+        memory_decision_attempts = 0
+        memory_decision_section_start = None
+        request_id_2 = None
+
         parsed_messages = parse_messages(messages)
 
         if self.config.custom_fact_extraction_prompt:
@@ -377,6 +386,7 @@ Status: {status}
             user_prompt = f"Input:\n{parsed_messages}"
         else:
             system_prompt, user_prompt = get_fact_retrieval_messages(parsed_messages)
+        fact_extraction_phase_start = time.time()
         # self.logger.info(f"\n{'='*40}\n[LLM Call 1/3]: Fact Extraction\n{'='*40}\n"
         #              f"--- INPUT (System Prompt) ---\n{system_prompt}\n"
         #              f"--- INPUT (User Prompt) ---\n{user_prompt}\n-----------------\n")
@@ -401,12 +411,13 @@ Status: {status}
         
         response = ""
         new_retrieved_facts = []
-        try_s = 0
         # 细化重试逻辑
         llm_error_retries = 0
         other_error_retries = 0
         MAX_OTHER_ERROR_RETRIES = 6
         while True:
+            attempt_start = time.time()
+            fact_extraction_attempts += 1
             try:
                 response = self.llm.generate_response(
                     messages=[
@@ -415,9 +426,19 @@ Status: {status}
                     ],
                     response_format={"type": "json_object"},
                 )
-                self._log_llm_call("Fact Extraction", request_id_1, fact_extraction_prompt, response, f"Success on attempt {try_s + 1}")
+                self._log_llm_call(
+                    "Fact Extraction",
+                    request_id_1,
+                    fact_extraction_prompt,
+                    response,
+                    f"Success on attempt {fact_extraction_attempts}",
+                )
                 response = remove_code_blocks(response)
                 new_retrieved_facts = json.loads(response)["facts"]
+                fact_extraction_duration = max(
+                    0.0,
+                    (time.time() - fact_extraction_phase_start) - fact_extraction_sleep_total,
+                )
                 break # Exit loop on success
             except Exception as e:
                 error_str = str(e).lower()
@@ -426,6 +447,7 @@ Status: {status}
                     llm_error_retries += 1
                     other_error_retries = 0  # 重置其他错误计数
                     sleep_duration = random.uniform(2, 20) + 5 * llm_error_retries
+                    fact_extraction_sleep_total += sleep_duration
                     error_message = f"LLM Rate Limit related Error. Retrying in {sleep_duration:.2f}s... Error: {e}"
                     
                     self._log_llm_call(
@@ -464,6 +486,12 @@ Status: {status}
                 # else:
                 #     time.sleep(random.randint(5, 10)+5*try_s)
 
+        if fact_extraction_duration == 0.0:
+            fact_extraction_duration = max(
+                0.0,
+                (time.time() - fact_extraction_phase_start) - fact_extraction_sleep_total,
+            )
+
         if not new_retrieved_facts:
             self.logger.debug("No new facts retrieved from input. Skipping memory update LLM call.")
 
@@ -498,21 +526,29 @@ Status: {status}
                 retrieved_old_memory, new_retrieved_facts, self.config.custom_update_memory_prompt
             )
             
-            try_s = 0
             request_id_2 = f"memory-decision-{uuid.uuid4()}"
             response = ""
-            try_s = 0
+            memory_decision_section_start = time.time()
+            memory_decision_attempts = 0
             # 细化重试逻辑
             llm_error_retries = 0
             other_error_retries = 0
             MAX_OTHER_ERROR_RETRIES = 6
             while True:
+                attempt_start = time.time()
+                memory_decision_attempts += 1
                 try:
                     response = self.llm.generate_response(
                         messages=[{"role": "user", "content": function_calling_prompt}],
                         response_format={"type": "json_object"},
                     )
-                    self._log_llm_call("Memory Decision", request_id_2, function_calling_prompt, response, f"Success on attempt {try_s + 1}")
+                    self._log_llm_call(
+                        "Memory Decision",
+                        request_id_2,
+                        function_calling_prompt,
+                        response,
+                        f"Success on attempt {memory_decision_attempts}",
+                    )
                     break
                 except Exception as e:
 
@@ -522,6 +558,7 @@ Status: {status}
                         llm_error_retries += 1
                         other_error_retries = 0  # 重置其他错误计数
                         sleep_duration = random.uniform(2, 20) + 5 * llm_error_retries
+                        memory_decision_sleep_total += sleep_duration
                         error_message = f"LLM Rate Limit related Error. Retrying in {sleep_duration:.2f}s... Error: {e}"
                         
                         self._log_llm_call(
@@ -621,6 +658,33 @@ Status: {status}
                     self.logger.error(f"Error processing memory action: {resp}, Error: {e}")
         except Exception as e:
             self.logger.error(f"Error iterating new_memories_with_actions: {e}")
+
+        if memory_decision_section_start is not None:
+            memory_decision_duration = max(
+                0.0,
+                (time.time() - memory_decision_section_start) - memory_decision_sleep_total,
+            )
+        if fact_extraction_phase_start is not None:
+            self.logger.info(
+                "Request ID [%s] Fact extraction duration: %.2fs (attempts=%d, retry_sleep_skipped=%.2fs)",
+                request_id_1,
+                fact_extraction_duration,
+                fact_extraction_attempts,
+                fact_extraction_sleep_total,
+            )
+        if memory_decision_section_start is not None:
+            self.logger.info(
+                "Request ID [%s] Memory decision duration: %.2fs (attempts=%d, retry_sleep_skipped=%.2fs)",
+                request_id_2,
+                memory_decision_duration,
+                memory_decision_attempts,
+                memory_decision_sleep_total,
+            )
+        else:
+            self.logger.info(
+                "Request ID [%s] Memory decision skipped (no new facts).",
+                request_id_1,
+            )
 
         keys, encoded_ids = process_telemetry_filters(filters)
         capture_event(

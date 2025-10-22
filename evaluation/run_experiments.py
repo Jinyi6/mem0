@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--is_graph", action="store_true", default=False, help="Whether to use graph-based search")
     parser.add_argument("--num_chunks", type=int, default=1, help="Number of chunks to process")
     parser.add_argument("--figure_view", action="store_true", default=False, help="Whether to include figure view in memory")
-    parser.add_argument("--embedder_model", type=str, default="BAAI/bge-m3", help="Embedding model name for the embedder")
+    parser.add_argument("--embedder_model", type=str, default="Pro/BAAI/bge-m3", help="Embedding model name for the embedder")
     parser.add_argument("--qdrant_path", type=str, default="./qdrant_data/tmp", help="Path for the Qdrant vector store")
     parser.add_argument("--dataset_name", type=str, default="locomo10_failed", help="Name of the dataset")
     parser.add_argument("--workspace_dir", type=str, default=".", help="Directory for all experiment outputs including logs.")
@@ -45,8 +45,36 @@ def main():
     parser.add_argument("--answer_mode", type=int, default=0, help="Answer prompt mode")
     parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of worker threads")
     parser.add_argument("--collection_name", type=str, default=None, help="Override Qdrant collection name (optional)")
+    parser.add_argument("--llm_model", type=str, default=None, help="Model name for LLM calls")
+    parser.add_argument("--llm_base_url", type=str, default=None, help="Base URL for LLM provider API")
+    parser.add_argument("--llm_api_key", type=str, default=None, help="API key for LLM provider")
+    parser.add_argument("--embedder_base_url", type=str, default=None, help="Base URL for embedder provider API")
+    parser.add_argument("--embedder_api_key", type=str, default=None, help="API key for embedder provider")
+    parser.add_argument("--embedder_dims", type=int, default=None, help="Output dimensionality for the embedder model")
 
     args = parser.parse_args()
+
+    def build_provider_config(model_value, base_url_value, api_key_value, optional_fields=None):
+        config = {}
+        if model_value:
+            config["model"] = model_value
+        if base_url_value:
+            config["base_url"] = base_url_value
+        if api_key_value:
+            config["api_key"] = api_key_value
+        if optional_fields:
+            for key, value in optional_fields.items():
+                if value not in (None, ""):
+                    config[key] = value
+        return config
+
+    llm_config = build_provider_config(args.llm_model, args.llm_base_url, args.llm_api_key)
+    embedder_config = build_provider_config(
+        args.embedder_model,
+        args.embedder_base_url,
+        args.embedder_api_key,
+        {"embedding_dims": args.embedder_dims},
+    )
 
     # Ensure workspace directory exists early (important for derived paths)
     os.makedirs(args.workspace_dir, exist_ok=True)
@@ -116,11 +144,12 @@ def main():
                 is_graph=args.is_graph, 
                 logger=logger,
                 figure_view=args.figure_view, 
-                embedder_model=args.embedder_model, 
                 qdrant_path=args.qdrant_path,
                 fact_extraction_mode=int(args.fact_extraction_mode),
                 memory_decision_mode=int(args.memory_decision_mode),
                 collection_name=args.collection_name,
+                llm_config=llm_config,
+                embedder_config=embedder_config,
             )
             memory_manager.process_all_conversations(max_workers=args.max_workers)
         elif args.method == "search":
@@ -138,6 +167,8 @@ def main():
                 search_method=int(args.search_mode),
                 answer_mode=int(args.answer_mode),
                 collection_name=args.collection_name,
+                llm_config=llm_config,
+                embedder_config=embedder_config,
             )
             memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json", max_workers=args.max_workers)
     elif args.technique_type == "full_context":
@@ -150,7 +181,9 @@ def main():
         # Instantiate and run the manager
         full_context_manager = FullContextManager(
             output_path=output_file_path, 
-            logger=logger
+            logger=logger,
+            llm_config=llm_config,
+            figure_view=args.figure_view
         )
 
         # The main processing call
