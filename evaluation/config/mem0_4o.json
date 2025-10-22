@@ -14,20 +14,21 @@
     "fact_extraction_mode": "3",
     "memory_decision_mode": "1",
     "search_mode": "5",
-    "answer_mode": "7",
+    "answer_mode": "0",
     "llm": {
       "model": "gpt-4o",
       "base_url": "https://openai.arnotho.com/v1",
-
+      "api_key": ""
     },
     "embedder": {
       "model": "Pro/BAAI/bge-m3",
       "base_url": "https://api.siliconflow.cn/v1",
-      "embedding_dims": 1536
+      "api_key": ""
     },
     "evaluator": {
-      "model": "Qwen/Qwen3-14B",
-      "base_url": "https://api.siliconflow.cn/v1",
+      "model": "",
+      "base_url": "",
+      "api_key": ""
     }
   },
   "eval_params": {
