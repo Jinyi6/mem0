@@ -1,7 +1,7 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo10_2",
+    "dataset_name": "locomo1_failed_half",
     "existing_workspace_dir": ""
   },
   "exp_params": {
@@ -11,17 +11,27 @@
     "filter_memories": false,
     "is_graph": false,
     "figure_view": true,
-    "fact_extraction_mode": "3",
-    "memory_decision_mode": "1",
-    "search_mode": "5",
-    "answer_mode": "7",
+    "fact_extraction_mode": "10",
+    "memory_decision_mode": "10",
+    "search_mode": "10",
+    "answer_mode": "10",
     "llm": {
       "model": "Qwen/Qwen3-14B",
       "base_url": "https://api.siliconflow.cn/v1",
       "api_key": ""
     },
+    "search_llm": {
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": ""
+    },
+    "answer_llm": {
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": ""
+    },
     "embedder": {
-      "model": "Qwen/Qwen3-Embedding-4B",
+      "model": "Pro/BAAI/bge-m3",
       "base_url": "",
       "api_key": "",
       "embedding_dims": 1024
@@ -33,12 +43,12 @@
     }
   },
   "eval_params": {
-    "max_workers": 5
+    "max_workers": 25
   },
   "add_params": {
-    "max_workers": 4
+    "max_workers": 25
   },
   "search_params": {
-    "max_workers": 6
+    "max_workers": 25
   }
 }

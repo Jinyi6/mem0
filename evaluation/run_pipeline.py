@@ -244,28 +244,42 @@ def main():
     memory_decision_mode_str = safe_param_value("memory_decision_mode")
     search_mode_str = safe_param_value("search_mode")
     answer_mode_str = safe_param_value("answer_mode")
-    llm_params = exp_params.get("llm", {})
+    llm_params = exp_params.get("llm", {}) or {}
+    search_llm_params = exp_params.get("search_llm") or {}
+    answer_llm_params = exp_params.get("answer_llm") or {}
     embedder_params = exp_params.get("embedder", {})
     evaluator_params = exp_params.get("evaluator", {})
 
-    llm_model = llm_params.get("model") or "Qwen/Qwen3-14B"
-    llm_base_url = llm_params.get("base_url") or "https://api.siliconflow.cn/v1"
-    llm_api_key = llm_params.get("api_key") or ""
+    add_llm_model = llm_params.get("model") or "Qwen/Qwen3-14B"
+    add_llm_base_url = llm_params.get("base_url") or "https://api.siliconflow.cn/v1"
+    add_llm_api_key = llm_params.get("api_key") or ""
+
+    search_llm_model = search_llm_params.get("model") or add_llm_model
+    search_llm_base_url = search_llm_params.get("base_url") or add_llm_base_url
+    search_llm_api_key = search_llm_params.get("api_key") or add_llm_api_key
+
+    answer_llm_model = answer_llm_params.get("model") or search_llm_model
+    answer_llm_base_url = answer_llm_params.get("base_url") or search_llm_base_url
+    answer_llm_api_key = answer_llm_params.get("api_key") or search_llm_api_key
 
     embedder_model = embedder_params.get("model") or "Pro/BAAI/bge-m3"
-    embedder_base_url = embedder_params.get("base_url") or llm_base_url
-    embedder_api_key = embedder_params.get("api_key") or llm_api_key
+    embedder_base_url = embedder_params.get("base_url") or search_llm_base_url
+    embedder_api_key = embedder_params.get("api_key") or search_llm_api_key
     embedder_dims = embedder_params.get("embedding_dims")
 
-    evaluator_model = evaluator_params.get("model") or llm_model
-    evaluator_base_url = evaluator_params.get("base_url") or llm_base_url
-    evaluator_api_key = evaluator_params.get("api_key") or llm_api_key
+    evaluator_model = evaluator_params.get("model") or answer_llm_model
+    evaluator_base_url = evaluator_params.get("base_url") or answer_llm_base_url
+    evaluator_api_key = evaluator_params.get("api_key") or answer_llm_api_key
 
-    os.environ["BASE_MODEL"] = llm_model
-    if llm_base_url:
-        os.environ["OPENAI_BASE_URL"] = llm_base_url
-    if llm_api_key:
-        os.environ["OPENAI_API_KEY"] = llm_api_key
+    def set_llm_env(model_value, base_url_value, api_key_value):
+        if model_value:
+            os.environ["BASE_MODEL"] = model_value
+        if base_url_value:
+            os.environ["OPENAI_BASE_URL"] = base_url_value
+        if api_key_value:
+            os.environ["OPENAI_API_KEY"] = api_key_value
+
+    set_llm_env(add_llm_model, add_llm_base_url, add_llm_api_key)
     if evaluator_model:
         os.environ["EVALUATOR_MODEL"] = evaluator_model
 
@@ -275,7 +289,7 @@ def main():
         # --- 行为和原来一致：创建新工作区 ---
         print("▶️ Starting from Step 1: A new workspace will be created.")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        llm_model_tag = sanitize_collection_name(llm_model)
+        llm_model_tag = sanitize_collection_name(add_llm_model)
         exp_name = (
             f"{dataset_name}_"
             f"model_{llm_model_tag}_"
@@ -363,9 +377,9 @@ def main():
             "--max_workers", str(add_max_workers),
             "--collection_name", collection_name,
         ]
-        append_arg(add_command, "--llm_model", llm_model)
-        append_arg(add_command, "--llm_base_url", llm_base_url)
-        append_arg(add_command, "--llm_api_key", llm_api_key)
+        append_arg(add_command, "--llm_model", add_llm_model)
+        append_arg(add_command, "--llm_base_url", add_llm_base_url)
+        append_arg(add_command, "--llm_api_key", add_llm_api_key)
         append_arg(add_command, "--embedder_base_url", embedder_base_url)
         append_arg(add_command, "--embedder_api_key", embedder_api_key)
         if embedder_dims is not None:
@@ -379,6 +393,7 @@ def main():
 
     if args.start_from_step <= 2:
         print("\n" + "#"*25 + " STEP 2: SEARCH MEMORIES " + "#"*25, flush=True)
+        set_llm_env(search_llm_model, search_llm_base_url, search_llm_api_key)
         search_max_workers = (
             config.get("search_params", {}).get("max_workers")
             or exp_params.get("max_workers", 6)
@@ -399,9 +414,15 @@ def main():
             "--max_workers", str(search_max_workers),
             "--collection_name", collection_name,
         ]
-        append_arg(search_command, "--llm_model", llm_model)
-        append_arg(search_command, "--llm_base_url", llm_base_url)
-        append_arg(search_command, "--llm_api_key", llm_api_key)
+        append_arg(search_command, "--llm_model", search_llm_model)
+        append_arg(search_command, "--llm_base_url", search_llm_base_url)
+        append_arg(search_command, "--llm_api_key", search_llm_api_key)
+        append_arg(search_command, "--search_llm_model", search_llm_model)
+        append_arg(search_command, "--search_llm_base_url", search_llm_base_url)
+        append_arg(search_command, "--search_llm_api_key", search_llm_api_key)
+        append_arg(search_command, "--answer_llm_model", answer_llm_model)
+        append_arg(search_command, "--answer_llm_base_url", answer_llm_base_url)
+        append_arg(search_command, "--answer_llm_api_key", answer_llm_api_key)
         append_arg(search_command, "--embedder_base_url", embedder_base_url)
         append_arg(search_command, "--embedder_api_key", embedder_api_key)
         if embedder_dims is not None:

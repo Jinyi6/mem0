@@ -22,29 +22,29 @@ from typing import Iterable, List
 
 # Historical input files that need to be re-evaluated.
 INPUT_FILES: List[str] = [
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_0/locomo10_0_top_k_30_filter_False_graph_False_3_1_5_0_20251014_234426/mem0_locomo10_0_results_top_30_filter_False_graph_False_20251014_234426_3_1_5_0.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_1/locomo10_1_top_k_30_filter_False_graph_False_3_1_5_0_20251015_035044/mem0_locomo10_1_results_top_30_filter_False_graph_False_20251015_035044_3_1_5_0.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_9/locomo10_9_top_k_30_filter_False_graph_False_3_1_5_0_20251016_134035/mem0_locomo10_9_results_top_30_filter_False_graph_False_20251016_134035_3_1_5_0.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_8/locomo10_8_top_k_30_filter_False_graph_False_3_1_5_0_20251016_080228/mem0_locomo10_8_results_top_30_filter_False_graph_False_20251016_080228_3_1_5_0.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_7/locomo10_7_top_k_30_filter_False_graph_False_3_1_5_0_20251015_200201/mem0_locomo10_7_results_top_30_filter_False_graph_False_20251015_200201_3_1_5_0.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_0_filter_False_graph_False_na_na_na_na_20251022_004331/full_context_locomo10_2_results_20251022_004331.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_0_filter_False_graph_False_na_na_na_na_20251022_131839/full_context_locomo10_2_results_20251022_131839.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_0_20251015_060725/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251015_060725_3_1_5_0.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_0_20251022_004002/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_105615_3_1_5_0.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_0_20251022_004002/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_131142_3_1_5_7.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_5_20251020_001617/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251020_001617_3_1_5_5.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_6_20251020_232546/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251020_232546_3_1_5_6.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_0/locomo10_0_top_k_30_filter_False_graph_False_3_1_5_0_20251014_234426/mem0_locomo10_0_results_top_30_filter_False_graph_False_20251014_234426_3_1_5_0.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_1/locomo10_1_top_k_30_filter_False_graph_False_3_1_5_0_20251015_035044/mem0_locomo10_1_results_top_30_filter_False_graph_False_20251015_035044_3_1_5_0.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_9/locomo10_9_top_k_30_filter_False_graph_False_3_1_5_0_20251016_134035/mem0_locomo10_9_results_top_30_filter_False_graph_False_20251016_134035_3_1_5_0.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_8/locomo10_8_top_k_30_filter_False_graph_False_3_1_5_0_20251016_080228/mem0_locomo10_8_results_top_30_filter_False_graph_False_20251016_080228_3_1_5_0.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_7/locomo10_7_top_k_30_filter_False_graph_False_3_1_5_0_20251015_200201/mem0_locomo10_7_results_top_30_filter_False_graph_False_20251015_200201_3_1_5_0.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_0_filter_False_graph_False_na_na_na_na_20251022_004331/full_context_locomo10_2_results_20251022_004331.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_0_filter_False_graph_False_na_na_na_na_20251022_131839/full_context_locomo10_2_results_20251022_131839.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_0_20251015_060725/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251015_060725_3_1_5_0.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_0_20251022_004002/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_105615_3_1_5_0.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_0_20251022_004002/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_131142_3_1_5_7.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_5_20251020_001617/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251020_001617_3_1_5_5.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_6_20251020_232546/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251020_232546_3_1_5_6.json",
 
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_6_20251020_232546/mem0_locomo10_2_results_top_30_filter_False_graph_False.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_7_20251022_011323/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_011323_3_1_5_7.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_7_20251022_011453/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_011453_3_1_5_7.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_7_20251022_140025/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_140025_3_1_5_7.json",
-    # "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_7_20251022_212343/mem0_locomo10_2_results_top_30_filter_False_graph_False.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_7_20251022_011323/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_011323_3_1_5_7.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_7_20251022_011453/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_011453_3_1_5_7.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_7_20251022_140025/mem0_locomo10_2_results_top_30_filter_False_graph_False_20251022_140025_3_1_5_7.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_6_20251020_232546/mem0_locomo10_2_results_top_30_filter_False_graph_False.json",
+    "/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/locomo10_2/locomo10_2_top_k_30_filter_False_graph_False_3_1_5_7_20251022_212343/mem0_locomo10_2_results_top_30_filter_False_graph_False.json",
 
-    "",
-    "",
-    "",
-    "",
+    # "",
+    # "",
+    # "",
+    # "",
 ]
 
 EVALUATION_DIR = Path(__file__).resolve().parent.parent
@@ -53,12 +53,14 @@ EVALS_SCRIPT = EVALUATION_DIR / "evals.py"
 FILENAME_TIMESTAMP_PATTERN = re.compile(r"(2025[^/]*?)(?:\.json)?$")
 
 # Static command arguments reused for each run.
+METRICS: List[str] = ["llm"]  # Extend with "f1"/"bleu" to enable additional metrics.
+
 BASE_COMMAND = [
     "python",
     "-u",
-    "./evals.py",
+    "./evals_v0.py",
     "--max_workers",
-    "10",
+    "20",
     "--evaluator_model",
     "Qwen/Qwen3-14B",
     "--evaluator_base_url",
@@ -66,6 +68,9 @@ BASE_COMMAND = [
     "--evaluator_api_key",
     "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo",
 ]
+
+if METRICS:
+    BASE_COMMAND.extend(["--metrics", *METRICS])
 
 
 def extract_timestamp(input_path: Path) -> str:
@@ -100,7 +105,7 @@ def derive_output_file(input_path: Path) -> Path:
         )
         print("Falling back to empty timestamp fragment.\n", flush=True)
 
-    return input_path.parent / f"evaluation_metrics_{timestamp}.json"
+    return input_path.parent / f"evaluation_metrics_{timestamp}_v5.json"
 
 
 def build_command(input_file: Path, output_file: Path) -> List[str]:

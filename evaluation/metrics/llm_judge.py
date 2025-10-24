@@ -67,31 +67,31 @@ def configure_evaluator(model=None, base_url=None, api_key=None):
 
 # LOCOMO version
 
-# ACCURACY_PROMPT = """
-# Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
-#     (1) a question (posed by one user to another user), 
-#     (2) a ’gold’ (ground truth) answer, 
-#     (3) a generated answer
-# which you will score as CORRECT/WRONG.
+ACCURACY_PROMPT = """
+Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
+    (1) a question (posed by one user to another user), 
+    (2) a ’gold’ (ground truth) answer, 
+    (3) a generated answer
+which you will score as CORRECT/WRONG.
 
-# The point of the question is to ask about something one user should know about the other user based on their prior conversations.
-# The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
-# Question: Do you remember what I got the last time I went to Hawaii?
-# Gold answer: A shell necklace
-# The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT. 
+The point of the question is to ask about something one user should know about the other user based on their prior conversations.
+The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
+Question: Do you remember what I got the last time I went to Hawaii?
+Gold answer: A shell necklace
+The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT. 
 
-# For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
+For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
 
-# Now it's time for the real question:
-# Question: {question}
-# Gold answer: {gold_answer}
-# Generated answer: {generated_answer}
+Now it's time for the real question:
+Question: {question}
+Gold answer: {gold_answer}
+Generated answer: {generated_answer}
 
-# First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
-# Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
+First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
+Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
 
-# Just return the label CORRECT or WRONG in a json format with the key as "label".
-# """
+Just return the label CORRECT or WRONG in a json format with the key as "label".
+"""
 
 # refined version within 10.1
 # ACCURACY_PROMPT = """
@@ -151,88 +151,88 @@ def configure_evaluator(model=None, base_url=None, api_key=None):
 
 # refined version within 10.12
 
-ACCURACY_PROMPT = """
-Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
-    (1) a question (posed by one user to another),
-    (2) a ’gold’ (ground truth) answer,
-    (3) a generated answer
-which you will score as CORRECT/WRONG.
+# ACCURACY_PROMPT = """
+# Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
+#     (1) a question (posed by one user to another),
+#     (2) a ’gold’ (ground truth) answer,
+#     (3) a generated answer
+# which you will score as CORRECT/WRONG.
 
-The point of the question is to ask about something one user should know about the other user based on their prior conversations.
-The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
-Question: Do you remember what I got the last time I went to Hawaii?
-Gold answer: A shell necklace
+# The point of the question is to ask about something one user should know about the other user based on their prior conversations.
+# The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
+# Question: Do you remember what I got the last time I went to Hawaii?
+# Gold answer: A shell necklace
 
-Decision Rules (minimal, to reduce false negatives without raising false positives):
+# Decision Rules (minimal, to reduce false negatives without raising false positives):
 
-1) Entity & polarity lock (strict)
-   - The generated answer must refer to the same thing/person/time as the gold; any different entity/time or negation flip => WRONG.
-   - Examples:
-     • Gold: “A shell necklace”; Gen: “A pearl necklace” => WRONG.
-     • Gold: “He moved to Boston”; Gen: “He didn’t move to Boston” => WRONG.
-     • Gold: “June 2023”; Gen: “July 2023” => WRONG.
+# 1) Entity & polarity lock (strict)
+#    - The generated answer must refer to the same thing/person/time as the gold; any different entity/time or negation flip => WRONG.
+#    - Examples:
+#      • Gold: “A shell necklace”; Gen: “A pearl necklace” => WRONG.
+#      • Gold: “He moved to Boston”; Gen: “He didn’t move to Boston” => WRONG.
+#      • Gold: “June 2023”; Gen: “July 2023” => WRONG.
 
-2) Synonyms/aliases/format variants (allowed)
-   - Accept clear paraphrases, aliases, and format variants that mean the same thing.
-   - Also accept trivial form variations that keep the same concept: singular/plural/lemma changes; gerund vs noun phrasing; obvious short typos/truncations that still point to the same word.
-   - Accept causal paraphrases that clearly keep the same cause (e.g., “advised/recommended/introduced/told to try” ≈ “advice”).
-   - Examples:
-     • Gold: “snakes”; Gen: “snake” => CORRECT.
-     • Gold: “exploring the great outdoors”; Gen: “outdoor/outdoors/outdoor activities” => CORRECT.
-     • Gold: “friend’s advice”; Gen: “a friend introduced/recommended it” => CORRECT.
-     • Gold: “practicing basketball outside for hours”; Gen: “basketbal” (obvious cutoff) => CORRECT.
-     • Gold: “03/15/2021”; Gen: “March 15, 2021” => CORRECT.
+# 2) Synonyms/aliases/format variants (allowed)
+#    - Accept clear paraphrases, aliases, and format variants that mean the same thing.
+#    - Also accept trivial form variations that keep the same concept: singular/plural/lemma changes; gerund vs noun phrasing; obvious short typos/truncations that still point to the same word.
+#    - Accept causal paraphrases that clearly keep the same cause (e.g., “advised/recommended/introduced/told to try” ≈ “advice”).
+#    - Examples:
+#      • Gold: “snakes”; Gen: “snake” => CORRECT.
+#      • Gold: “exploring the great outdoors”; Gen: “outdoor/outdoors/outdoor activities” => CORRECT.
+#      • Gold: “friend’s advice”; Gen: “a friend introduced/recommended it” => CORRECT.
+#      • Gold: “practicing basketball outside for hours”; Gen: “basketbal” (obvious cutoff) => CORRECT.
+#      • Gold: “03/15/2021”; Gen: “March 15, 2021” => CORRECT.
 
-3) Specificity/entailment (one-way, head-preserving)
-   - More specific answers that logically entail the gold are CORRECT.
-   - Slight generalization is also CORRECT when it preserves the same head concept/topic and only drops modifiers or rolls up ONE level to the immediate parent category, without introducing alternatives.
-   - If the gold includes essential qualifiers whose removal changes identity (e.g., flavor/type/brand among many siblings) OR the question is a reason (“why…?”) but the answer gives only a preference/statement (not a cause), => WRONG.
-   - Examples (ACCEPT):
-     • Gold: “work”; Gen: “work stress” => CORRECT (same head).
-     • Gold: “cakes”; Gen: “baked goods” => CORRECT (immediate parent only).
-     • Gold: “malfunctioning navigation app on the new phone”; Gen: “phone app malfunction” => CORRECT (immediate parent; same domain).
-   - Examples (REJECT):
-     • Gold: “pepperoni pizza”; Gen: “pizza/food/Italian food” => WRONG (too broad; many siblings).
-     • Gold: “Coke”; Gen: “soda” => WRONG.
-     • Gold (why): “Possibly because he likes to drink beer on his days off.”; Gen: “He prefers beer / prefers beer over Starbucks.” => WRONG (not a cause; missing condition).
+# 3) Specificity/entailment (one-way, head-preserving)
+#    - More specific answers that logically entail the gold are CORRECT.
+#    - Slight generalization is also CORRECT when it preserves the same head concept/topic and only drops modifiers or rolls up ONE level to the immediate parent category, without introducing alternatives.
+#    - If the gold includes essential qualifiers whose removal changes identity (e.g., flavor/type/brand among many siblings) OR the question is a reason (“why…?”) but the answer gives only a preference/statement (not a cause), => WRONG.
+#    - Examples (ACCEPT):
+#      • Gold: “work”; Gen: “work stress” => CORRECT (same head).
+#      • Gold: “cakes”; Gen: “baked goods” => CORRECT (immediate parent only).
+#      • Gold: “malfunctioning navigation app on the new phone”; Gen: “phone app malfunction” => CORRECT (immediate parent; same domain).
+#    - Examples (REJECT):
+#      • Gold: “pepperoni pizza”; Gen: “pizza/food/Italian food” => WRONG (too broad; many siblings).
+#      • Gold: “Coke”; Gen: “soda” => WRONG.
+#      • Gold (why): “Possibly because he likes to drink beer on his days off.”; Gen: “He prefers beer / prefers beer over Starbucks.” => WRONG (not a cause; missing condition).
 
-4) Extra non-conflicting detail is fine; alternatives/hedging are not
-   - Extra descriptive detail is allowed if it doesn’t contradict the gold. Listing alternatives or hedging counts as WRONG.
-   - Examples:
-     • Gold: “A shell necklace”; Gen: “A shell necklace from the street market” => CORRECT.
-     • Gold: “Paris”; Gen: “Paris, France” => CORRECT.
-     • Gold: “A shell necklace”; Gen: “A shell necklace or earrings” => WRONG.
-     • Gold: “Paris”; Gen: “Maybe Paris?” => WRONG.
+# 4) Extra non-conflicting detail is fine; alternatives/hedging are not
+#    - Extra descriptive detail is allowed if it doesn’t contradict the gold. Listing alternatives or hedging counts as WRONG.
+#    - Examples:
+#      • Gold: “A shell necklace”; Gen: “A shell necklace from the street market” => CORRECT.
+#      • Gold: “Paris”; Gen: “Paris, France” => CORRECT.
+#      • Gold: “A shell necklace”; Gen: “A shell necklace or earrings” => WRONG.
+#      • Gold: “Paris”; Gen: “Maybe Paris?” => WRONG.
 
-5) Lists, numbers, units, and dates (tight equivalence)
-   - If the gold explicitly lists multiple required items, ALL must be present—no more, no less. Subsets/supersets/alternatives (“or/and-or/slash”) => WRONG.
-   - Treat text as a list only when the gold clearly enumerates parallel items (and/&/slash “/”/the Chinese “、/和/与/以及”/comma-separated parallel nouns). Not a list when a comma is part of a single named item (e.g., “Washington, D.C.”) or a numeric separator (“1,000”).
-   - Accept exact unit/date format equivalents (no value change). Do NOT accept vague approximations if the gold is exact.
-   - For subjective descriptions, if the gold lists multiple concrete attributes (e.g., taste/texture/colour: “super good, rich and creamy”), the generated answer must preserve those attributes (or clear paraphrases). Generic sentiment alone (“loved it”, “good”) => WRONG.
-     • Examples: Gold “Super good, rich and creamy”; Gen “He loved it” => WRONG; Gen “rich and creamy” => CORRECT.
-   - Approximate quantifiers vs exact numbers are NOT equivalent (e.g., “a few/several/a couple” ≠ “4/3/2” unless the gold itself says that mapping). 
-     • Examples: Gold “A few months”; Gen “4 months” => WRONG.
-   - Date granularity must MATCH (no broadening or narrowing): Day ≠ Month; Month ≠ Year.
-     • Examples: Gold “February, 2023”; Gen “8 February 2023” => WRONG.  Gold “March 15, 2021”; Gen “March 2021” => WRONG.
-   - Additional list examples:
-     • Gold: “different fantasy novels, characters, themes, and book recommendations”; Gen: “fantasy and book articles” => WRONG (missing listed items).
-     • Gold: “cat and dog”; Gen: “cat” => WRONG; Gen: “cat and dog” => CORRECT.
+# 5) Lists, numbers, units, and dates (tight equivalence)
+#    - If the gold explicitly lists multiple required items, ALL must be present—no more, no less. Subsets/supersets/alternatives (“or/and-or/slash”) => WRONG.
+#    - Treat text as a list only when the gold clearly enumerates parallel items (and/&/slash “/”/the Chinese “、/和/与/以及”/comma-separated parallel nouns). Not a list when a comma is part of a single named item (e.g., “Washington, D.C.”) or a numeric separator (“1,000”).
+#    - Accept exact unit/date format equivalents (no value change). Do NOT accept vague approximations if the gold is exact.
+#    - For subjective descriptions, if the gold lists multiple concrete attributes (e.g., taste/texture/colour: “super good, rich and creamy”), the generated answer must preserve those attributes (or clear paraphrases). Generic sentiment alone (“loved it”, “good”) => WRONG.
+#      • Examples: Gold “Super good, rich and creamy”; Gen “He loved it” => WRONG; Gen “rich and creamy” => CORRECT.
+#    - Approximate quantifiers vs exact numbers are NOT equivalent (e.g., “a few/several/a couple” ≠ “4/3/2” unless the gold itself says that mapping). 
+#      • Examples: Gold “A few months”; Gen “4 months” => WRONG.
+#    - Date granularity must MATCH (no broadening or narrowing): Day ≠ Month; Month ≠ Year.
+#      • Examples: Gold “February, 2023”; Gen “8 February 2023” => WRONG.  Gold “March 15, 2021”; Gen “March 2021” => WRONG.
+#    - Additional list examples:
+#      • Gold: “different fantasy novels, characters, themes, and book recommendations”; Gen: “fantasy and book articles” => WRONG (missing listed items).
+#      • Gold: “cat and dog”; Gen: “cat” => WRONG; Gen: “cat and dog” => CORRECT.
 
-Now it's time for the real question:
-Question: {question}
-Gold answer: {gold_answer}
-Generated answer: {generated_answer}
+# Now it's time for the real question:
+# Question: {question}
+# Gold answer: {gold_answer}
+# Generated answer: {generated_answer}
 
-First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
-Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
+# First, provide a short (one sentence) explanation of your reasoning, then finish with CORRECT or WRONG. 
+# Do NOT include both CORRECT and WRONG in your response, or it will break the evaluation script.
 
-Just return the label CORRECT or WRONG in a json format with the key as "label":
+# Just return the label CORRECT or WRONG in a json format with the key as "label":
 
-```json
-{{
-    "label": "CORRECT" or "WRONG"
-}}
-"""
+# ```json
+# {{
+#     "label": "CORRECT" or "WRONG"
+# }}
+# """
 
 import time
 import random

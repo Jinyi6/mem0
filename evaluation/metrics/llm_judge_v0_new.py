@@ -53,42 +53,6 @@ def _build_client() -> AsyncOpenAI:
     return AsyncOpenAI(**client_kwargs)
 
 
-def _atomic_write_json(path: str, payload) -> None:
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=4, ensure_ascii=False)
-    os.replace(tmp_path, path)
-
-
-def _close_client() -> None:
-    global _client
-    client = _client
-    if not client:
-        return
-    _client = None
-    closer = getattr(client, "aclose", None)
-    if not callable(closer):
-        return
-
-    loop = _event_loop if _event_loop and _event_loop.is_running() else None
-    if loop:
-        future = asyncio.run_coroutine_threadsafe(closer(), loop)
-        try:
-            future.result()
-        except Exception as exc:
-            print(f"⚠️ AsyncOpenAI 客户端关闭失败: {exc}")
-        return
-
-    try:
-        asyncio.run(closer())
-    except RuntimeError:
-        tmp_loop = asyncio.new_event_loop()
-        try:
-            tmp_loop.run_until_complete(closer())
-        finally:
-            tmp_loop.close()
-
-
 def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
@@ -123,33 +87,11 @@ def _ensure_event_loop() -> asyncio.AbstractEventLoop:
     _event_loop_ready.wait()
     return _event_loop
 
-
-def shutdown_event_loop() -> None:
-    global _event_loop, _event_loop_thread
-    with _event_loop_lock:
-        loop = _event_loop
-        thread = _event_loop_thread
-        _event_loop = None
-        _event_loop_thread = None
-    if not loop:
-        return
-    if loop.is_running():
-        loop.call_soon_threadsafe(loop.stop)
-    if thread and thread.is_alive():
-        thread.join(timeout=5)
-    try:
-        loop.close()
-    except Exception:
-        pass
-    _event_loop_ready.clear()
-
 def configure_evaluator(model=None, base_url=None, api_key=None):
     """
     运行期更新评测端参数。传 None 表示保持现值。
     """
     global _client, _evaluator_model, _evaluator_base_url, _evaluator_api_key
-    if _client is not None:
-        _close_client()
     if model:
         _evaluator_model = model
     if base_url is not None:
@@ -344,60 +286,50 @@ def main():
     LLM_JUDGE = defaultdict(list)
     RESULTS = defaultdict(list)
 
-    flush_interval = 50
-    processed_since_flush = 0
-    dirty = False
+    index = 0
+    for k, v in data.items():
+        for x in v:
+            question = x["question"]
+            gold_answer = x["answer"]           # 允许为 str 或 list[str]
+            generated_answer = x["response"]
+            category = x["category"]
 
-    def flush_results():
-        nonlocal dirty, processed_since_flush
-        if not dirty:
-            return
-        _atomic_write_json(output_path, dict(RESULTS))
-        dirty = False
-        processed_since_flush = 0
+            # Skip category 5
+            if int(category) == 5:
+                continue
 
-    try:
-        index = 0
-        for k, v in data.items():
-            for x in v:
-                question = x["question"]
-                gold_answer = x["answer"]  # 允许为 str 或 list[str]
-                generated_answer = x["response"]
-                category = x["category"]
+            # Evaluate
+            label = evaluate_llm_judge(question, gold_answer, generated_answer)
+            LLM_JUDGE[category].append(label)
 
-                if int(category) == 5:
-                    continue
+            # Store
+            RESULTS[index].append(
+                {
+                    "question": question,
+                    "gt_answer": gold_answer,
+                    "response": generated_answer,
+                    "category": category,
+                    "llm_label": label,
+                }
+            )
 
-                label = evaluate_llm_judge(question, gold_answer, generated_answer)
-                LLM_JUDGE[category].append(label)
+            # Save intermediate
+            with open(output_path, "w") as f:
+                json.dump(RESULTS, f, indent=4, ensure_ascii=False)
 
-                RESULTS[index].append(
-                    {
-                        "question": question,
-                        "gt_answer": gold_answer,
-                        "response": generated_answer,
-                        "category": category,
-                        "llm_label": label,
-                    }
-                )
-                dirty = True
-                processed_since_flush += 1
-                if processed_since_flush >= flush_interval:
-                    flush_results()
+            # Live accuracy by category
+            print("All categories accuracy:")
+            for cat, results in LLM_JUDGE.items():
+                if results:
+                    print(f"  Category {cat}: {np.mean(results):.4f} ({sum(results)}/{len(results)})")
+            print("------------------------------------------")
+        index += 1
 
-                print("All categories accuracy:")
-                for cat, results in LLM_JUDGE.items():
-                    if results:
-                        print(f"  Category {cat}: {np.mean(results):.4f} ({sum(results)}/{len(results)})")
-                print("------------------------------------------")
-            index += 1
+    # Final save
+    with open(output_path, "w") as f:
+        json.dump(RESULTS, f, indent=4, ensure_ascii=False)
 
-        flush_results()
-    finally:
-        flush_results()
-        _close_client()
-        shutdown_event_loop()
-
+    # Summary
     print("PATH: ", dataset_path)
     print("------------------------------------------")
     for k, v in LLM_JUDGE.items():

@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import random
@@ -6,13 +5,16 @@ import re
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 import traceback
+from datetime import datetime
+
+import pytz
 
 from dotenv import load_dotenv
 from tqdm import tqdm
-from src.utils import normalize_dataset_records
+from src.utils import compute_dataset_stats, stream_normalized_dataset
 load_dotenv()  # Load environment variables from .env file
 LOCAL_MEM0_PATH = os.getenv("LOCAL_MEM0_PATH")
 if not LOCAL_MEM0_PATH:
@@ -69,7 +71,26 @@ Generate personal memories that follow these guidelines:
 
 
 
+class _StreamingDataset:
+    """
+    Lightweight iterable wrapper that streams normalized dataset records on demand.
+    """
+
+    def __init__(self, owner: "MemoryADD"):
+        self._owner = owner
+
+    def __iter__(self):
+        if not self._owner.data_path:
+            return iter(())
+        return stream_normalized_dataset(self._owner.data_path)
+
+    def __len__(self):
+        stats = self._owner._dataset_stats or self._owner.load_data()
+        return stats.get("total_conversations", 0)
+
+
 class MemoryADD:
+    PACIFIC_TZ = pytz.timezone("US/Pacific")
     def __init__(self, data_path=None, batch_size=6, is_graph=False, logger=None, **kwargs):
         llm_config = kwargs.get("llm_config") or {}
         embedder_config = kwargs.get("embedder_config") or {}
@@ -133,11 +154,12 @@ class MemoryADD:
         self.logger = logger if logger else logging.getLogger(__name__)
         self.batch_size = batch_size
         self.data_path = data_path
-        self.data = None
+        self._dataset_stats = None
+        self.data = _StreamingDataset(self) if data_path else None
         self.is_graph = is_graph
         self.figure_view = kwargs.get("figure_view", False)
-        self.fact_extraction_mode = int(kwargs.get("fact_extraction_mode", "0"))
-        self.memory_decision_mode = int(kwargs.get("memory_decision_mode", "0"))
+        self.fact_extraction_mode = self._normalize_mode(kwargs.get("fact_extraction_mode", "0"))
+        self.memory_decision_mode = self._normalize_mode(kwargs.get("memory_decision_mode", "0"))
         self.llm_model = llm_model
 
         qdrant_path = config["vector_store"]["config"]["path"]
@@ -148,34 +170,48 @@ class MemoryADD:
             f"Using Qdrant path '{qdrant_path}' with collection '{self.collection_name}' for memory writes."
         )
 
-        if self.fact_extraction_mode == 0:
+        if self.fact_extraction_mode == "0":
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT
 
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT
-        elif self.fact_extraction_mode == 1:
+        elif self.fact_extraction_mode == "1":
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_1
 
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_1
-        elif self.fact_extraction_mode == 2:
+        elif self.fact_extraction_mode == "2":
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_2
 
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_2
-        elif self.fact_extraction_mode == 3:
+        elif self.fact_extraction_mode == "3":
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_3
 
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_3
+        elif self.fact_extraction_mode == "10":
+            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_10
 
-        if self.memory_decision_mode == 0:
+            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_10
+
+        if self.memory_decision_mode == "0":
             from mem0.configs.prompts import DEFAULT_UPDATE_MEMORY_PROMPT
-
-            config["custom_memory_decision_prompt"] = DEFAULT_UPDATE_MEMORY_PROMPT
-        elif self.memory_decision_mode == 1:
+            config["custom_update_memory_prompt"] = DEFAULT_UPDATE_MEMORY_PROMPT
+        elif self.memory_decision_mode == "1":
             from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_1
-
-            config["custom_memory_decision_prompt"] = UPDATE_MEMORY_PROMPT_1
+            config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_1
+        elif self.memory_decision_mode == "2":
+            from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_2
+            config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_2
+        elif self.memory_decision_mode == "2agg":
+            from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_2_agg
+            config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_2_agg
+        elif self.memory_decision_mode == "2con":
+            from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_2_con
+            config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_2_con
+        elif self.memory_decision_mode == "10":
+            from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_10
+            config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_10
         # please modify the prompt in mem0/configs/prompts.py if you want to change the memory decision prompt
 
-        self._max_parallelism_cap = max(1, min(os.cpu_count() or 4, 6))
+        self._max_parallelism_cap = max(1, min(os.cpu_count() or 4, 12))
         self._pbar_lock = threading.Lock()
         self._memory_lock = threading.Lock()
         self._memory_semaphore = threading.Semaphore(self._max_parallelism_cap)
@@ -188,10 +224,72 @@ class MemoryADD:
         self.memory.logger = self.logger
         self._ensure_collection_exists()
 
+    @staticmethod
+    def _normalize_mode(value):
+        """
+        Ensure mode values are normalized strings for downstream prompt selection.
+        """
+        normalized = "0" if value is None else str(value).strip()
+        if not normalized:
+            normalized = "0"
+        return normalized
+
+    @classmethod
+    def _canonicalize_timestamp(cls, timestamp_value):
+        """
+        Convert incoming timestamps into timezone-aware datetimes in US/Pacific.
+        """
+        if timestamp_value in (None, ""):
+            return None
+
+        text = str(timestamp_value).strip()
+        if not text:
+            return None
+
+        # Attempt to parse the dataset-specific format first (e.g., "1:56 pm on 8 May, 2023")
+        try:
+            cleaned = re.sub(r"\b(am|pm)\b", lambda m: m.group(1).upper(), text, flags=re.IGNORECASE)
+            parsed = datetime.strptime(cleaned, "%I:%M %p on %d %B, %Y")
+            return cls.PACIFIC_TZ.localize(parsed)
+        except Exception:
+            pass
+
+        # Attempt ISO formats (supporting trailing 'Z')
+        iso_candidate = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(iso_candidate)
+            if parsed.tzinfo is None:
+                return cls.PACIFIC_TZ.localize(parsed)
+            return parsed.astimezone(cls.PACIFIC_TZ)
+        except Exception:
+            pass
+
+        # Attempt epoch seconds
+        try:
+            seconds = float(text)
+            return datetime.fromtimestamp(seconds, tz=cls.PACIFIC_TZ)
+        except Exception:
+            return None
+
+    def _build_timestamp_metadata(self, timestamp_value):
+        """
+        Assemble consistent timestamp metadata for storage.
+        """
+        metadata = {}
+        canonical_dt = self._canonicalize_timestamp(timestamp_value)
+        if canonical_dt:
+            metadata["timestamp"] = canonical_dt.isoformat()
+            metadata["timestamp_epoch"] = canonical_dt.timestamp()
+            metadata["timestamp_tz"] = "US/Pacific"
+        if timestamp_value not in (None, ""):
+            metadata["timestamp_original"] = str(timestamp_value)
+        return metadata
+
     def load_data(self):
-        with open(self.data_path, "r") as f:
-            raw_data = json.load(f)
-        self.data = normalize_dataset_records(raw_data)
+        if not self.data_path:
+            raise ValueError("No data path configured for MemoryADD.")
+        self._dataset_stats = compute_dataset_stats(self.data_path)
+        self.data = _StreamingDataset(self)
         return self.data
 
     @staticmethod
@@ -278,23 +376,38 @@ class MemoryADD:
                 )
                 raise
 
-    def add_memories_for_speaker(self, speaker, messages, timestamp, message_pbar=None):
+    def add_memories_for_speaker(
+        self,
+        speaker,
+        messages,
+        timestamp,
+        message_pbar=None,
+        update_progress=True,
+    ):
         for i in range(0, len(messages), self.batch_size):
             batch_messages = messages[i : i + self.batch_size]
-            self.add_memory(speaker, batch_messages, metadata={"timestamp": timestamp})
-            if message_pbar:
+            metadata = self._build_timestamp_metadata(timestamp)
+            self.add_memory(speaker, batch_messages, metadata=metadata or None)
+            if message_pbar and update_progress:
                 with self._pbar_lock:
-                    message_pbar.update(self.batch_size/2)
+                    message_pbar.update(len(batch_messages))
 
     def process_conversation(self, item, idx, session_pbar=None, message_pbar=None):
 
         max_retries = 2  # 定义最大重试次数 (总共尝试 1 + 2 = 3 次)
 
         for attempt in range(max_retries + 1):
+            total_session_count = 0
+            total_dialogue_count = 0
+            sessions_processed = 0
+            dialogues_processed = 0
             try:
-                conversation = item["conversation"]
-                speaker_a = conversation["speaker_a"]
-                speaker_b = conversation["speaker_b"]
+                conversation = item.get("conversation") or {}
+                speaker_a = conversation.get("speaker_a")
+                speaker_b = conversation.get("speaker_b")
+
+                if not speaker_a or not speaker_b:
+                    raise ValueError(f"Conversation {idx} 缺少必要的说话者信息。")
 
                 speaker_a_user_id = f"{speaker_a}_{idx}"
                 speaker_b_user_id = f"{speaker_b}_{idx}"
@@ -310,19 +423,18 @@ class MemoryADD:
                     if key.startswith("session_") and not key.endswith("_date_time")
                 ]
                 total_session_count = len(session_keys)
-                total_dialogue_count = sum(
-                    len(conversation.get(key, []))
-                    if isinstance(conversation.get(key, []), list)
-                    else 0
-                    for key in session_keys
-                )
-                sessions_processed = 0
-                dialogues_processed = 0
+                total_dialogue_count = 0
+                for key in session_keys:
+                    chats = conversation.get(key, [])
+                    if isinstance(chats, list):
+                        total_dialogue_count += len(chats)
 
                 for key in session_keys:
                     date_time_key = key + "_date_time"
-                    timestamp = conversation[date_time_key]
-                    chats = conversation[key]
+                    timestamp = conversation.get(date_time_key)
+                    chats = conversation.get(key, [])
+                    if not isinstance(chats, list):
+                        continue
 
                     messages = []
                     messages_reverse = []
@@ -340,8 +452,20 @@ class MemoryADD:
                         else:
                             raise ValueError(f"Unknown speaker: {chat['speaker']}")
 
-                    self.add_memories_for_speaker(speaker_a_user_id, messages, timestamp, message_pbar)
-                    self.add_memories_for_speaker(speaker_b_user_id, messages_reverse, timestamp, message_pbar)
+                    self.add_memories_for_speaker(
+                        speaker_a_user_id,
+                        messages,
+                        timestamp,
+                        message_pbar,
+                        update_progress=True,
+                    )
+                    self.add_memories_for_speaker(
+                        speaker_b_user_id,
+                        messages_reverse,
+                        timestamp,
+                        message_pbar,
+                        update_progress=False,
+                    )
 
                     sessions_processed += 1
                     dialogues_processed += len(chats)
@@ -392,22 +516,15 @@ class MemoryADD:
     #             future.result()
 
     def process_all_conversations(self, max_workers=10):
-        if not self.data:
-            raise ValueError("No data loaded. Please set data_path and call load_data() first.")
+        if not self.data_path:
+            raise ValueError("No data path configured. 请先设置 data_path 再调用 process_all_conversations().")
 
-        total_conversations = len(self.data)
-        total_sessions = 0
-        total_dialogues = 0
-        for item in self.data:
-            conversation = item.get("conversation", {})
-            session_keys = [
-                key for key in conversation.keys() if key.startswith("session_") and not key.endswith("_date_time")
-            ]
-            total_sessions += len(session_keys)
-            for key in session_keys:
-                chats = conversation.get(key, [])
-                if isinstance(chats, list):
-                    total_dialogues += len(chats)
+        if not self._dataset_stats:
+            self.load_data()
+        stats = self._dataset_stats or {}
+        total_conversations = stats.get("total_conversations", 0)
+        total_sessions = stats.get("total_sessions", 0)
+        total_dialogues = stats.get("total_dialogues", 0)
 
         resolved_workers = self._resolve_max_workers(max_workers)
         print(f"--- 总共需要处理 {total_conversations} 组对话 ---")
@@ -417,6 +534,10 @@ class MemoryADD:
             print(f"⚙️ 调整 max_workers: 从 {max_workers} -> {resolved_workers}")
         else:
             print(f"⚙️ 使用 max_workers = {resolved_workers}")
+
+        if total_conversations == 0:
+            print("📭 数据集为空，无需执行导入。")
+            return
 
         successful_count = 0
         failed_count = 0
@@ -431,27 +552,43 @@ class MemoryADD:
             else None
         )
 
-        try:
-            with ThreadPoolExecutor(max_workers=resolved_workers) as executor:
-                futures = {
-                    executor.submit(self.process_conversation, item, idx, session_pbar, message_pbar): f"Conversation {idx}"
-                    for idx, item in enumerate(self.data)
-                }
+        futures = {}
+        drain_threshold = max(resolved_workers, 1) * 4
 
-                for future in as_completed(futures):
-                    conversation_id = futures[future]
-                    try:
-                        future.result()
-                        successful_count += 1
-                    except Exception as e:
-                        error_details = traceback.format_exc()
-                        failed_count += 1
-                        conversation_pbar.write(
-                            f"\n---[Error {failed_count}] ❌ Error processing {conversation_id}: {str(e)} ---\n"
-                        )
-                        conversation_pbar.write(f"{error_details}\n")
-                    finally:
-                        conversation_pbar.update(1)
+        def consume_one():
+            nonlocal successful_count, failed_count
+            if not futures:
+                return
+            done, _ = wait(tuple(futures.keys()), return_when=FIRST_COMPLETED)
+            for finished in done:
+                conversation_id = futures.pop(finished)
+                try:
+                    finished.result()
+                    successful_count += 1
+                except Exception as exc:
+                    failed_count += 1
+                    error_details = "".join(
+                        traceback.format_exception(type(exc), exc, exc.__traceback__)
+                    )
+                    conversation_pbar.write(
+                        f"\n---[Error {failed_count}] ❌ Error processing {conversation_id}: {exc} ---\n"
+                    )
+                    conversation_pbar.write(f"{error_details}\n")
+                finally:
+                    conversation_pbar.update(1)
+
+        try:
+            with ThreadPoolExecutor(max_workers=resolved_workers, thread_name_prefix="mem-add") as executor:
+                for idx, item in enumerate(stream_normalized_dataset(self.data_path)):
+                    future = executor.submit(self.process_conversation, item, idx, session_pbar, message_pbar)
+                    futures[future] = f"Conversation {idx}"
+                    if len(futures) >= drain_threshold:
+                        consume_one()
+
+                while futures:
+                    consume_one()
+        except Exception as exc:
+            raise RuntimeError("Failed during threaded memory ingestion.") from exc
         finally:
             conversation_pbar.close()
             if session_pbar:

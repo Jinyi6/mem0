@@ -16,6 +16,16 @@
       "base_url": "https://openai.arnotho.com/v1",
       "api_key": ""
     },
+    "search_llm": {
+      "model": "gpt-4o",
+      "base_url": "https://openai.arnotho.com/v1",
+      "api_key": ""
+    },
+    "answer_llm": {
+      "model": "gpt-4o",
+      "base_url": "https://openai.arnotho.com/v1",
+      "api_key": ""
+    },
     "evaluator": {
       "model": "",
       "base_url": "",
@@ -23,6 +33,6 @@
     }
   },
   "eval_params": {
-    "max_workers": 10
+    "max_workers": 25
   }
 }

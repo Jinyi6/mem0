@@ -3,7 +3,6 @@ import concurrent.futures
 import json
 import os
 from collections import defaultdict
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from tqdm import tqdm
@@ -16,25 +15,13 @@ os.environ["LOCAL_MEM0_PATH"] = os.path.dirname(os.path.dirname(os.path.abspath(
 
 # os.environ['OPENAI_API_KEY'] = "sk-vyvftxtwuiznrwrfvayhfitxgpdpsykrdnukzfdtdwtjgqvo"
 # os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["MEM0_TELEMETRY"] = "False"
+# os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+# os.environ["MEM0_TELEMETRY"] = "False"
 
-from metrics.llm_judge_v5 import configure_evaluator, submit_llm_judge
+from metrics.llm_judge_v0_new import configure_evaluator, submit_llm_judge
 from utils.result_merger import merge_memory_and_scores, save_json_file
 
 DATASET_FIXED_PATH = Path(__file__).resolve().parent / "dataset" / "locomo10_fixed.json"
-
-
-@contextmanager
-def _thread_pool(max_workers: int):
-    """
-    ThreadPoolExecutor wrapper that cancels pending futures during shutdown to avoid thread leakage.
-    """
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="eval-worker")
-    try:
-        yield executor
-    finally:
-        executor.shutdown(wait=True, cancel_futures=True)
 
 
 def _coerce_numeric_key(value):
@@ -371,7 +358,7 @@ def main():
 
             try:
                 inner_total = len(items_to_process)
-                with _thread_pool(args.max_workers) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
                     futures = []
                     for item_idx, item in enumerate(items_to_process, start=1):
                         future = executor.submit(

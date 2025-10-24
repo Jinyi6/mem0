@@ -39,15 +39,21 @@ def main():
     parser.add_argument("--dataset_name", type=str, default="locomo10_failed", help="Name of the dataset")
     parser.add_argument("--workspace_dir", type=str, default=".", help="Directory for all experiment outputs including logs.")
     # fact_extraction_mode
-    parser.add_argument("--fact_extraction_mode", type=int, default=0, help="Fact extraction prompt mode")
-    parser.add_argument("--memory_decision_mode", type=int, default=0, help="Memory decision prompt mode")
-    parser.add_argument("--search_mode", type=int, default=0, help="Search mode")
-    parser.add_argument("--answer_mode", type=int, default=0, help="Answer prompt mode")
+    parser.add_argument("--fact_extraction_mode", type=str, default="0", help="Fact extraction prompt mode")
+    parser.add_argument("--memory_decision_mode", type=str, default="0", help="Memory decision prompt mode")
+    parser.add_argument("--search_mode", type=str, default="0", help="Search mode identifier")
+    parser.add_argument("--answer_mode", type=str, default="0", help="Answer prompt mode")
     parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of worker threads")
     parser.add_argument("--collection_name", type=str, default=None, help="Override Qdrant collection name (optional)")
     parser.add_argument("--llm_model", type=str, default=None, help="Model name for LLM calls")
     parser.add_argument("--llm_base_url", type=str, default=None, help="Base URL for LLM provider API")
     parser.add_argument("--llm_api_key", type=str, default=None, help="API key for LLM provider")
+    parser.add_argument("--search_llm_model", type=str, default=None, help="Model name for memory search operations")
+    parser.add_argument("--search_llm_base_url", type=str, default=None, help="Base URL for the search LLM provider")
+    parser.add_argument("--search_llm_api_key", type=str, default=None, help="API key for the search LLM provider")
+    parser.add_argument("--answer_llm_model", type=str, default=None, help="Model name for answer generation")
+    parser.add_argument("--answer_llm_base_url", type=str, default=None, help="Base URL for the answer LLM provider")
+    parser.add_argument("--answer_llm_api_key", type=str, default=None, help="API key for the answer LLM provider")
     parser.add_argument("--embedder_base_url", type=str, default=None, help="Base URL for embedder provider API")
     parser.add_argument("--embedder_api_key", type=str, default=None, help="API key for embedder provider")
     parser.add_argument("--embedder_dims", type=int, default=None, help="Output dimensionality for the embedder model")
@@ -68,7 +74,15 @@ def main():
                     config[key] = value
         return config
 
-    llm_config = build_provider_config(args.llm_model, args.llm_base_url, args.llm_api_key)
+    add_llm_config = build_provider_config(args.llm_model, args.llm_base_url, args.llm_api_key)
+    search_llm_model = args.search_llm_model or args.llm_model
+    search_llm_base_url = args.search_llm_base_url or args.llm_base_url
+    search_llm_api_key = args.search_llm_api_key or args.llm_api_key
+    search_llm_config = build_provider_config(search_llm_model, search_llm_base_url, search_llm_api_key)
+    answer_llm_model = args.answer_llm_model or args.search_llm_model or args.llm_model
+    answer_llm_base_url = args.answer_llm_base_url or args.search_llm_base_url or args.llm_base_url
+    answer_llm_api_key = args.answer_llm_api_key or args.search_llm_api_key or args.llm_api_key
+    answer_llm_config = build_provider_config(answer_llm_model, answer_llm_base_url, answer_llm_api_key)
     embedder_config = build_provider_config(
         args.embedder_model,
         args.embedder_base_url,
@@ -145,10 +159,10 @@ def main():
                 logger=logger,
                 figure_view=args.figure_view, 
                 qdrant_path=args.qdrant_path,
-                fact_extraction_mode=int(args.fact_extraction_mode),
-                memory_decision_mode=int(args.memory_decision_mode),
+                fact_extraction_mode=args.fact_extraction_mode,
+                memory_decision_mode=args.memory_decision_mode,
                 collection_name=args.collection_name,
-                llm_config=llm_config,
+                llm_config=add_llm_config,
                 embedder_config=embedder_config,
             )
             memory_manager.process_all_conversations(max_workers=args.max_workers)
@@ -164,10 +178,11 @@ def main():
                 args.is_graph,
                 logger=logger,
                 qdrant_path=args.qdrant_path,
-                search_method=int(args.search_mode),
-                answer_mode=int(args.answer_mode),
+                search_method=args.search_mode,
+                answer_mode=args.answer_mode,
                 collection_name=args.collection_name,
-                llm_config=llm_config,
+                llm_config=search_llm_config,
+                answer_llm_config=answer_llm_config,
                 embedder_config=embedder_config,
             )
             memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json", max_workers=args.max_workers)
@@ -182,7 +197,7 @@ def main():
         full_context_manager = FullContextManager(
             output_path=output_file_path, 
             logger=logger,
-            llm_config=llm_config,
+            llm_config=answer_llm_config or add_llm_config,
             figure_view=args.figure_view
         )
 

@@ -873,3 +873,33 @@ Final Answer：
 - 仅给简洁答案，语言与问题一致；专名保持原文。
 - 可仅在必要时以括号加入**日期计算**或**允许推理**的简短说明（必要解释），但不展开步骤性过程。
 """
+
+ANSWER_PROMPT_10 = """
+You are a forensic memory analyst. Your only task is to answer the user's question strictly from the provided memories—never from assumptions or external knowledge.
+
+# MINDSET
+- Treat every statement in the memories as evidence. If a detail is not explicitly supported, do not mention it.
+- Reply in the same language as the question. Preserve proper nouns exactly as written.
+- When multiple memories mention the same topic, prefer the most recent timestamp unless the newer entry is marked as uncertain.
+- Lists must include every relevant item without duplicates; order items by newest timestamp first, then alphabetically if needed.
+
+# METHOD (think silently, do NOT reveal these steps)
+1. Parse the question to pinpoint the required subject and attribute.
+2. Scan all memories for direct mentions and collect candidate evidence with timestamps.
+3. Resolve conflicts by applying: explicit corrections > most recent timestamp > greater specificity.
+4. Convert relative times to absolute dates only when the memory timestamp makes the conversion unambiguous; otherwise keep the original wording.
+5. Before responding, verify that each word in the final answer is justified by at least one memory.
+
+# OUTPUT FORMAT (STRICT)
+- Provide a single concise sentence or phrase that answers the question.
+- Do NOT include explanations, bullet points, prefixes (e.g., "Answer:"), or reasoning in your output.
+- If the memories lack the necessary information, respond exactly with: "Information not available".
+
+Memories for user {{speaker_1_user_id}}:
+{{speaker_1_memories}}
+
+Memories for user {{speaker_2_user_id}}:
+{{speaker_2_memories}}
+
+Question: {{question}}
+"""

@@ -195,6 +195,31 @@ Instructions & Constraints:
 Following is a conversation between the user and the assistant. You have to extract the relevant facts and preferences about the user, if any, from the conversation and return them in the json format as shown above.
 """
 
+FACT_RETRIEVAL_PROMPT_10 = f"""You are a bilingual conversation archivist. Your job is to capture only durable, user-centric facts from the dialogue below and return them as a clean, deduplicated fact log.
+
+Workflow (run every time):
+1. Skim Pass: Read the full conversation to understand context and the roles of each speaker.
+2. Candidate Harvest: For every user utterance, list the concrete facts it might contain (names, plans, preferences, commitments, biographical details, outcomes). Ignore rhetorical questions, hypotheticals, or assistant suggestions.
+3. Verification: Keep a candidate only if it is explicit, unambiguous, and attributable to a speaker as stated. Discard anything speculative, contradicted, time-bound to the immediate chat ("brb", "see you tomorrow"), or originating from the assistant.
+4. Consolidation: Merge fragments about the same subject into one comprehensive sentence while preserving critical numbers, dates, quotes, and modifiers. Maintain the user's original language (English, Chinese, etc.).
+5. Ordering & Final Check: Sort the surviving facts by conversation order (oldest first). Ensure no duplicate information, and ensure every fact names the relevant entity ("User", "John", etc.).
+
+Quality guardrails:
+- Capture the full extent of enumerations (e.g., list every hobby that is mentioned together).
+- Retain relative time expressions verbatim unless the speaker already gives an absolute date.
+- If a speaker expresses uncertainty ("maybe", "not sure"), do not record it as a fact.
+- When a fact references someone other than the User, include that person's name and relationship if stated.
+- If the conversation is entirely small-talk or lacks factual content, return an empty list.
+
+Output requirements:
+- Return valid JSON of the exact form {{"facts": [<string>, ...]}}.
+- Each string must be a single sentence that can stand alone and faithfully reflects the source wording.
+- Produce the response in the same language used by the user in the conversation.
+
+Today's date is {datetime.now().strftime("%Y-%m-%d")}.
+Below is the conversation transcript you must analyze. Remember: capture only enduring facts about the user or people they mention, following the rules above.
+"""
+
 DEFAULT_UPDATE_MEMORY_PROMPT = """You are a meticulous Memory Curation Agent. Your task is to analyze new facts and integrate them with an existing memory store by determining the correct operation for each piece of information.
 
 You can perform four core operations: ADD, UPDATE, DELETE, and NONE.
@@ -358,6 +383,228 @@ Your final output must be a single JSON object with a key "memory" containing a 
     ]
 }
 """
+
+UPDATE_MEMORY_PROMPT_2 = """
+You are a cautious "Memory Decision Agent". 
+Your task is to decide how to modify a user's memory store given:
+(1) a list of NEW_FACTS extracted from the latest conversation, and 
+(2) a table of EXISTING_MEMORIES with temporary string IDs ("0","1","2",...).
+
+## Allowed actions per fact
+- "ADD": Create a new memory when the fact is important, long-lived, and not already covered by any existing memory.
+- "UPDATE": When a fact corrects, specifies, or meaningfully changes details (numbers/dates/names/statuses) of ONE most relevant existing memory. 
+- "DELETE": Only when an existing memory is clearly wrong or has been explicitly retracted/invalidated by the user.
+- "NONE": When a fact is trivial/short-lived, or fully redundant with existing memory.
+
+## VERY IMPORTANT ID RULE
+For UPDATE or DELETE, you MUST pick exactly one "id" from the EXISTING_MEMORIES table below. 
+These IDs are temporary integer strings ("0","1",...). NEVER invent UUIDs. NEVER use any other format.
+
+## Quality bar (avoid over-saving)
+- Prefer "NONE" unless you are confident that ADD/UPDATE/DELETE improves the store.
+- DO NOT store assistant messages, speculations, or vague preferences ("maybe", "probably").
+- Ignore generic chit-chat, greetings, yes/no, thanks, or transient logistics (e.g., "brb", "see you in 5 mins").
+- Prefer UPDATE over ADD when the new fact refines or corrects an existing memory about the same topic/entity/timeframe.
+
+## Deduplication / conflict handling
+- If NEW_FACT is semantically equivalent to an existing memory → "NONE".
+- If it adds a missing key detail (e.g., date/quantity/specific name) to an existing one → "UPDATE" that one (choose best single match).
+- If it contradicts an existing memory → "UPDATE" that one with the newer/correct fact. 
+  Use "DELETE" only when the entire existing memory is invalidated and should be removed.
+- If multiple existing memories are similar, choose the most specific one for UPDATE and set others to "NONE" (do not chain updates).
+
+## Output JSON (STRICT)
+Return a single JSON object with the key "memory" mapped to a list of actions. 
+Each action is a JSON object with fields:
+- "event": one of "ADD" | "UPDATE" | "DELETE" | "NONE"
+- "text": the final memory text after action (required for ADD/UPDATE/DELETE; for NONE set empty string "")
+- "id": required only for UPDATE/DELETE; value must be one of the string IDs shown below (e.g., "0")
+- "old_memory": for UPDATE optionally echo the previous text to help with auditing
+
+Do NOT wrap JSON in markdown fences. Do NOT add any other top-level keys. 
+Keep the list concise (max 3 actions). If nothing qualifies, return: {"memory":[{"event":"NONE","text":""}]}
+
+----------------
+
+## Examples
+
+### Example A (update a detail)
+- NEW_FACT: "He moved to Seattle in 2024."
+- EXISTING: id "1": "He lives in Boston."
+Return:
+{
+  "memory": [
+    {
+      "event": "UPDATE",
+      "id": "1",
+      "old_memory": "He lives in Boston.",
+      "text": "He lives in Seattle since 2024."
+    }
+  ]
+}
+
+### Example B (duplicate → NONE)
+- NEW_FACT: "She likes hiking."
+- EXISTING: id "0": "She enjoys hiking on weekends."
+Return:
+{"memory":[{"event":"NONE","text":""}]}
+
+### Example C (new important fact → ADD)
+- NEW_FACT: "Her birthday is May 3."
+- EXISTING: (no birthday memory)
+Return:
+{"memory":[{"event":"ADD","text":"Her birthday is May 3."}]}
+
+### Example D (fully invalid → DELETE)
+- NEW_FACT: "He no longer works at Acme; he quit."
+- EXISTING: id "2": "He works at Acme."
+Return:
+{"memory":[{"event":"DELETE","id":"2","text":"He no longer works at Acme; he quit."}]}
+"""
+
+UPDATE_MEMORY_PROMPT_2_agg = """
+You are a proactive "Memory Decision Agent".
+Goal: maximize useful coverage with safe guardrails.
+
+Inputs:
+- EXISTING_MEMORIES: a table with temporary string IDs "0","1","2",...
+- NEW_FACTS: candidate facts extracted from the latest turn
+
+Allowed actions per fact
+- "ADD": add if the fact is long-lived OR clarifies a recurring topic not yet captured.
+- "UPDATE": if the fact corrects, specifies, or modernizes ONE most relevant existing memory.
+- "DELETE": only if an existing memory is fully invalidated.
+- "NONE": if the fact is trivial/ephemeral or pure duplicate.
+
+VERY IMPORTANT ID RULE
+For UPDATE or DELETE, you MUST pick exactly one "id" among EXISTING_MEMORIES.
+IDs are temporary integer strings ("0","1",...). NEVER invent UUIDs.
+
+Aggressive decision rubric (lower thresholds for action)
+1) Compute a rough match_score in [0..5] between NEW_FACT and each existing memory.
+   - +1 topic match, +1 same subject/entity, +1 same attribute (e.g., date/number/name),
+     +1 explicit correction cue (“now”, “no longer”, “changed”), +1 high specificity (dates/quantities/proper nouns).
+2) Choose action:
+   - If any existing memory has match_score ≥ 2 → prefer "UPDATE" that best single match (highest specificity wins).
+   - Else if the fact contains stable anchors (date/quantity/proper noun, or clear commitment like “will pursue PhD”) → "ADD".
+   - Else if semantically equivalent to any existing → "NONE".
+   - "DELETE" only with explicit invalidation cues (“no longer”, “cancelled”, “moved from X to Y” where X becomes invalid).
+3) Canonicalize text:
+   - Short, declarative, long-lived. Include key specifics (dates/quantities/entities). Avoid chit-chat/politeness.
+4) Output at most 6 actions total. Prefer UPDATE over ADD when both make sense.
+
+Output JSON (STRICT)
+Return one JSON object:
+{
+  "memory": [
+    {
+      "event": "ADD" | "UPDATE" | "DELETE" | "NONE",
+      "text": "...",               // required for ADD/UPDATE/DELETE; for NONE use ""
+      "id": "0"                    // required only for UPDATE/DELETE; must be one of the shown IDs
+      "old_memory": "..."          // optional; for UPDATE helpful for auditing
+    }
+  ]
+}
+Do NOT wrap in markdown fences. No other top-level keys.
+
+----------------
+
+Examples (concise)
+- NEW: "He moved to Seattle in 2024."  EXISTING id "1": "He lives in Boston." → UPDATE id "1" → "He lives in Seattle since 2024."
+- NEW: "She likes hiking."  EXISTING id "0": "She enjoys hiking on weekends." → NONE.
+- NEW: "Her birthday is May 3." (no birthday memory) → ADD.
+- NEW: "He no longer works at Acme."  EXISTING id "2": "He works at Acme." → DELETE id "2" with replacement text.
+
+"""
+
+UPDATE_MEMORY_PROMPT_2_con = """
+You are a cautious "Memory Decision Agent".
+Goal: minimize churn and errors. Default to "NONE" unless strict criteria are met.
+
+Inputs:
+- EXISTING_MEMORIES with temporary string IDs "0","1","2",...
+- NEW_FACTS from the latest turn
+
+Allowed actions per fact
+- "ADD": only if the fact is long-lived AND has strong anchors (clear subject + specific predicate + at least one of: date/number/proper noun/explicit commitment).
+- "UPDATE": only if there is a HIGH-confidence match to ONE existing memory AND the new fact corrects/specifies it (explicit cues like “now”, “no longer”, “updated”, changed numbers/dates/names).
+- "DELETE": only if the existing memory is explicitly retracted/invalidated in the new fact.
+- "NONE": for duplicates, vague preferences, hedged language (“maybe/probably”), chit-chat, or transient logistics.
+
+VERY IMPORTANT ID RULE
+For UPDATE/DELETE, pick exactly one "id" from the table. IDs are "0","1",... strings. Do NOT invent UUIDs.
+
+Conservative decision rubric (higher thresholds for action)
+1) Compute a strict match_score in [0..5] for each existing memory:
+   +2 same subject/entity (explicit), +1 same attribute (date/number/name), +1 explicit correction cue,
+   +1 higher specificity than existing.
+2) Choose action:
+   - UPDATE only if there exists a memory with match_score ≥ 3. Otherwise do NOT update.
+   - ADD only if the fact meets the long-lived + strong-anchor rule and is NOT covered by any existing memory (no near-duplicate).
+   - DELETE only with explicit invalidation terms (“no longer”, “cancelled”, “moved from X to Y” where X is obsolete).
+   - Otherwise → NONE.
+3) Canonicalize text: concise, factual, time-stamped when applicable. Avoid assistant talk, opinions, hedged or temporary states.
+4) Output at most 2 actions total. If uncertain, choose NONE.
+
+Output JSON (STRICT)
+Return one JSON object:
+{
+  "memory": [
+    {
+      "event": "ADD" | "UPDATE" | "DELETE" | "NONE",
+      "text": "...",               // required for ADD/UPDATE/DELETE; for NONE use ""
+      "id": "0",                   // required only for UPDATE/DELETE; must be one of the shown IDs
+      "old_memory": "..."          // optional; for UPDATE helpful for auditing
+    }
+  ]
+}
+Do NOT wrap in markdown fences. No other top-level keys.
+
+----------------
+
+Examples (strict)
+- NEW: "He moved to Seattle in 2024."  EXISTING id "1": "He lives in Boston." → UPDATE id "1".
+- NEW: "She likes hiking."  EXISTING id "0": "She enjoys hiking on weekends." → NONE.
+- NEW: "Her birthday is May 3." (no birthday memory) → ADD.
+- NEW: "He no longer works at Acme."  EXISTING id "2": "He works at Acme." → DELETE id "2".
+
+"""
+
+UPDATE_MEMORY_PROMPT_10 = """You are a memory reconciliation specialist. You must integrate NEW_FACTS from the latest conversation with the EXISTING_MEMORIES table so that the store remains concise, correct, and auditable.
+
+### Decision Stack
+1. Validate each fact: keep only items that are explicit, long-lived, and relevant to the user profile. Ignore assistant statements, questions, tentative language, or rapidly expiring logistics.
+2. Match intelligently: for every retained fact, check if an existing memory already covers it. Prefer UPDATE over ADD when the new fact enriches, clarifies, or corrects a current record.
+3. Conflict handling: if a fact contradicts an existing memory, issue DELETE on the outdated memory **and** ADD the replacement fact. Never silently overwrite conflicting data.
+4. Minimal surface area: return at most three actions. If uncertain about usefulness, choose NONE.
+
+### Operation Rules
+- ADD: Only when the fact introduces a distinct piece of durable knowledge not already captured.
+- UPDATE: When a single existing memory should be rewritten to incorporate refined details. Provide the original text in "old_memory".
+- DELETE: Use when an existing memory is invalidated or proven incorrect. Pair with ADD if new truth exists.
+- NONE: Use for redundant, trivial, or low-value facts. When you output NONE, set text="" and omit id.
+
+### ID Discipline
+Use the string IDs exactly as shown in EXISTING_MEMORIES for UPDATE and DELETE. Never create new IDs or reuse numbers for ADD.
+
+### Output Format
+Return a JSON object: {"memory": [ ... ]}
+Each entry must include:
+- event (ADD | UPDATE | DELETE | NONE)
+- text (final memory text; empty string for NONE)
+- id (required for UPDATE/DELETE; skip for ADD/NONE)
+- old_memory (only for UPDATE, optional but recommended)
+
+### Sanity Checks Before Responding
+- Would this fact still matter next week? If not, use NONE.
+- Does the wording preserve key numbers, dates, quotes, and relationships? If not, refine it.
+- Are two operations solving the same need? Merge them.
+
+If no meaningful changes are necessary, return {"memory":[{"event":"NONE","text":""}]}.
+Respond with JSON only—no markdown fences or commentary.
+"""
+
+
 
 PROCEDURAL_MEMORY_SYSTEM_PROMPT = """
 You are a memory summarization system that records and preserves the complete interaction history between a human and an AI agent. You are provided with the agent’s execution history over the past N steps. Your task is to produce a comprehensive summary of the agent's output history that contains every detail necessary for the agent to continue the task without ambiguity. **Every output produced by the agent must be recorded verbatim as part of the summary.**

@@ -21,6 +21,16 @@
       "base_url": "https://api.siliconflow.cn/v1",
       "api_key": ""
     },
+    "search_llm": {
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": ""
+    },
+    "answer_llm": {
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": ""
+    },
     "embedder": {
       "model": "Pro/BAAI/bge-m3",
       "base_url": "",
@@ -34,12 +44,12 @@
     }
   },
   "eval_params": {
-    "max_workers": 5
+    "max_workers": 25
   },
   "add_params": {
-    "max_workers": 4
+    "max_workers": 20
   },
   "search_params": {
-    "max_workers": 6
+    "max_workers": 20
   }
 }

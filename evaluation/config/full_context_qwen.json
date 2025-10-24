@@ -18,6 +18,16 @@
       "base_url": "https://api.siliconflow.cn/v1",
       "api_key": ""
     },
+    "search_llm": {
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": ""
+    },
+    "answer_llm": {
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": ""
+    },
     "evaluator": {
       "model": "Qwen/Qwen3-14B",
       "base_url": "",
@@ -25,6 +35,6 @@
     }
   },
   "eval_params": {
-    "max_workers": 10
+    "max_workers": 25
   }
 }
