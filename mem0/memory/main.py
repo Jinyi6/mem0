@@ -47,6 +47,18 @@ from mem0.utils.factory import (
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*SwigPy.*")
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*swigvarlink.*")
 
+def _safe_cpu_count(default: int = 1) -> int:
+    for resolver in (getattr(os, "process_cpu_count", None), getattr(os, "cpu_count", None)):
+        if callable(resolver):
+            try:
+                value = resolver()
+            except Exception:
+                continue
+            if isinstance(value, int) and value > 0:
+                return value
+    return default
+
+
 def _build_filters_and_metadata(
     *,  # Enforce keyword-only arguments
     user_id: Optional[str] = None,
@@ -142,7 +154,7 @@ class Memory(MemoryBase):
         self.config = config
         self.logger = logger if logger else logging.getLogger(__name__)
         self._shared_executor = shared_executor
-        self._default_executor_workers = max(1, min((os.process_cpu_count() or 1), 4))
+        self._default_executor_workers = max(1, min(_safe_cpu_count(), 4))
 
         self.custom_fact_extraction_prompt = self.config.custom_fact_extraction_prompt
         self.custom_update_memory_prompt = self.config.custom_update_memory_prompt
