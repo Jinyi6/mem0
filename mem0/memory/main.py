@@ -1,5 +1,6 @@
 import asyncio
 import concurrent
+from concurrent.futures import ThreadPoolExecutor
 import gc
 import hashlib
 import json
@@ -10,6 +11,7 @@ import time
 import uuid
 import warnings
 from copy import deepcopy
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -131,9 +133,16 @@ setup_config()
 
 
 class Memory(MemoryBase):
-    def __init__(self, config: MemoryConfig = MemoryConfig(), logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        config: MemoryConfig = MemoryConfig(),
+        logger: Optional[logging.Logger] = None,
+        shared_executor: Optional[ThreadPoolExecutor] = None,
+    ):
         self.config = config
         self.logger = logger if logger else logging.getLogger(__name__)
+        self._shared_executor = shared_executor
+        self._default_executor_workers = max(1, min((os.process_cpu_count() or 1), 4))
 
         self.custom_fact_extraction_prompt = self.config.custom_fact_extraction_prompt
         self.custom_update_memory_prompt = self.config.custom_update_memory_prompt
@@ -171,7 +180,12 @@ class Memory(MemoryBase):
         capture_event("mem0.init", self, {"sync_type": "sync"})
 
     @classmethod
-    def from_config(cls, config_dict: Dict[str, Any], logger: Optional[logging.Logger] = None) -> "Memory"  :
+    def from_config(
+        cls,
+        config_dict: Dict[str, Any],
+        logger: Optional[logging.Logger] = None,
+        shared_executor: Optional[ThreadPoolExecutor] = None,
+    ) -> "Memory":
         try:
             config = cls._process_config(config_dict)
             config = MemoryConfig(**config_dict)
@@ -179,7 +193,25 @@ class Memory(MemoryBase):
             log = logger if logger else logging.getLogger(cls.__name__)
             log.error(f"Configuration validation error: {e}")
             raise
-        return cls(config, logger=logger)
+        return cls(config, logger=logger, shared_executor=shared_executor)
+
+    def set_shared_executor(self, executor: Optional[ThreadPoolExecutor]):
+        self._shared_executor = executor
+
+    @contextmanager
+    def _executor(self, prefix: str):
+        if self._shared_executor:
+            yield self._shared_executor
+            return
+
+        executor = ThreadPoolExecutor(
+            max_workers=self._default_executor_workers,
+            thread_name_prefix=prefix,
+        )
+        try:
+            yield executor
+        finally:
+            executor.shutdown(wait=True)
 
     @staticmethod
     def _process_config(config_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -306,8 +338,14 @@ Status: {status}
         else:
             messages = parse_vision_messages(messages)
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future1 = executor.submit(self._add_to_vector_store, messages, processed_metadata, effective_filters, infer)
+        with self._executor("mem0-add") as executor:
+            future1 = executor.submit(
+                self._add_to_vector_store,
+                messages,
+                processed_metadata,
+                effective_filters,
+                infer,
+            )
             future2 = executor.submit(self._add_to_graph, messages, effective_filters)
 
             concurrent.futures.wait([future1, future2])
@@ -788,7 +826,7 @@ Status: {status}
             "mem0.get_all", self, {"limit": limit, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "sync"}
         )
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with self._executor("mem0-get") as executor:
             future_memories = executor.submit(self._get_all_from_vector_store, effective_filters, limit)
             future_graph_entities = (
                 executor.submit(self.graph.get_all, effective_filters, limit) if self.enable_graph else None
@@ -903,8 +941,10 @@ Status: {status}
             },
         )
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_memories = executor.submit(self._search_vector_store, query, effective_filters, limit, threshold)
+        with self._executor("mem0-search") as executor:
+            future_memories = executor.submit(
+                self._search_vector_store, query, effective_filters, limit, threshold
+            )
             future_graph_entities = (
                 executor.submit(self.graph.search, query, effective_filters, limit) if self.enable_graph else None
             )

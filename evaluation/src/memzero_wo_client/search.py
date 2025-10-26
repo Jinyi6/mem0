@@ -49,7 +49,8 @@ config = {
 
 class MemorySearch:
     def __init__(self, output_path="results.json", top_k=10, filter_memories=False, is_graph=False):
-        self.memory = Memory.from_config(config)
+        self._io_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mem0-search-io")
+        self.memory = Memory.from_config(config, shared_executor=self._io_executor)
         self.top_k = top_k
         self.openai_client = OpenAI()
         self.results = defaultdict(list)
@@ -133,6 +134,13 @@ class MemorySearch:
             speaker_2_graph_memories,
             response_time,
         )
+
+    def close(self):
+        if getattr(self, "_io_executor", None):
+            self._io_executor.shutdown(wait=True, cancel_futures=True)
+            self._io_executor = None
+            if hasattr(self.memory, "set_shared_executor"):
+                self.memory.set_shared_executor(None)
 
     def process_question(self, val, speaker_a_user_id, speaker_b_user_id):
         question = val.get("question", "")

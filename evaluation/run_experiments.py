@@ -165,7 +165,11 @@ def main():
                 llm_config=add_llm_config,
                 embedder_config=embedder_config,
             )
-            memory_manager.process_all_conversations(max_workers=args.max_workers)
+            try:
+                memory_manager.process_all_conversations(max_workers=args.max_workers)
+            finally:
+                if hasattr(memory_manager, "close"):
+                    memory_manager.close()
         elif args.method == "search":
             output_file_path = os.path.join(
                 args.output_folder,
@@ -185,7 +189,13 @@ def main():
                 answer_llm_config=answer_llm_config,
                 embedder_config=embedder_config,
             )
-            memory_searcher.process_data_file(f"./dataset/{args.dataset_name}.json", max_workers=args.max_workers)
+            try:
+                memory_searcher.process_data_file(
+                    f"./dataset/{args.dataset_name}.json", max_workers=args.max_workers
+                )
+            finally:
+                if hasattr(memory_searcher, "close"):
+                    memory_searcher.close()
     elif args.technique_type == "full_context":
         print("🚀 Running 'full_context' processing...")
         output_file_path = os.path.join(

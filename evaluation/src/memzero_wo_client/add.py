@@ -215,14 +215,29 @@ class MemoryADD:
         self._pbar_lock = threading.Lock()
         self._memory_lock = threading.Lock()
         self._memory_semaphore = threading.Semaphore(self._max_parallelism_cap)
+        self._io_executor = ThreadPoolExecutor(
+            max_workers=max(2, min(self._max_parallelism_cap, 4)),
+            thread_name_prefix="mem0-io",
+        )
 
         if data_path:
             self.load_data()
 
-        self.memory = Memory.from_config(config)
+        self.memory = Memory.from_config(
+            config,
+            logger=self.logger,
+            shared_executor=self._io_executor,
+        )
         # Then, set the logger attribute on the created instance
         self.memory.logger = self.logger
         self._ensure_collection_exists()
+
+    def close(self):
+        if getattr(self, "_io_executor", None):
+            self._io_executor.shutdown(wait=True, cancel_futures=True)
+            self._io_executor = None
+            if hasattr(self.memory, "set_shared_executor"):
+                self.memory.set_shared_executor(None)
 
     @staticmethod
     def _normalize_mode(value):

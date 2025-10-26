@@ -297,7 +297,16 @@ class MemorySearch:
             self.collection_name,
         )
 
-        self.memory = Memory.from_config(config)
+        self._io_executor = ThreadPoolExecutor(
+            max_workers=max(2, min(self._max_parallelism_cap, 4)),
+            thread_name_prefix="mem0-search-io",
+        )
+
+        self.memory = Memory.from_config(
+            config,
+            logger=self.logger,
+            shared_executor=self._io_executor,
+        )
         self.memory.logger = self.logger
         self._ensure_collection_exists()
 
@@ -1652,3 +1661,8 @@ class MemorySearch:
         if self._rerank_executor:
             self._rerank_executor.shutdown(wait=True, cancel_futures=True)
             self._rerank_executor = None
+        if getattr(self, "_io_executor", None):
+            self._io_executor.shutdown(wait=True, cancel_futures=True)
+            self._io_executor = None
+            if hasattr(self.memory, "set_shared_executor"):
+                self.memory.set_shared_executor(None)
