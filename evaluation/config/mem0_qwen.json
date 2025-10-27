@@ -2,7 +2,7 @@
   "experiment_setup": {
     "base_dir": "exp_data",
     "dataset_name": "locomo10_2",
-    "existing_workspace_dir": ""
+    "existing_workspace_dir": "exp_data/locomo10_2/locomo10_2_model_Qwen_Qwen3_14B_top_k_30_filter_False_graph_False_10_10_10_10_20251024_222215"
   },
   "exp_params": {
     "technique_type": "mem0",
@@ -11,7 +11,7 @@
     "filter_memories": false,
     "is_graph": false,
     "figure_view": true,
-    "fact_extraction_mode": "3",
+    "fact_extraction_mode": "10",
     "memory_decision_mode": "10",
     "search_mode": "10",
     "answer_mode": "0",

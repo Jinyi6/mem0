@@ -497,14 +497,15 @@ class MemorySearch:
         Returns:
             tuple: (semantic_memories, graph_memories, search_time)
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
         sleep_penalty = 0.0
         attempts = 0
         retries = 0
+        retry_sleeps = []
         while retries < max_retries:
             attempts += 1
             try:
-                memories = self.memory.search(
+                memory_payload = self.memory.search(
                     query,
                     user_id=user_id,
                     limit=self.top_k,
@@ -525,32 +526,42 @@ class MemorySearch:
                     self._ensure_collection_exists()
                     continue
 
+                backoff = min(8.0, 0.75 * (2 ** (retries - 1))) + random.uniform(0.1, 0.6)
+                retry_sleeps.append(backoff)
                 self.logger.warning(
-                    "Retrying search for user %s...%s/%s\tError: %s",
+                    "Retrying search for user %s...%s/%s | backoff=%.2fs | error_type=%s | error=%s\n%s",
                     user_id,
                     retries,
                     max_retries,
+                    backoff,
+                    type(e).__name__,
                     error_message,
+                    traceback.format_exc(),
                 )
                 if retries >= max_retries:
                     raise
-                backoff = random.uniform(0.5, 2)
                 sleep_penalty += backoff
                 time.sleep(backoff)  # 减少重试延迟
 
-        end_time = time.time()
-
+        end_time = time.perf_counter()
         search_duration = max(0.0, end_time - start_time - sleep_penalty)
-        self.logger.info(
-            "Search success for user %s in %.2fs (attempts=%d, retry_sleep_skipped=%.2fs)",
-            user_id,
-            search_duration,
-            attempts,
-            sleep_penalty,
-        )
 
+        if "memory_payload" not in locals():
+            memory_payload = {"results": []}
+
+        raw_memories = []
+        search_metrics = {}
+        graph_payload = None
+        if isinstance(memory_payload, dict):
+            raw_memories = memory_payload.get("results") or []
+            search_metrics = memory_payload.get("metrics") or {}
+            graph_payload = memory_payload.get("relations")
+        else:
+            raw_memories = memory_payload or []
+
+        postprocess_start = time.perf_counter()
         semantic_memories = []
-        for memory in memories["results"]:
+        for memory in raw_memories:
             metadata = memory.get("metadata") or {}
             timestamp_iso = metadata.get("timestamp") or memory.get("created_at")
             timestamp_original = metadata.get("timestamp_original")
@@ -574,7 +585,50 @@ class MemorySearch:
                     "score": round(memory["score"], 2),
                 }
             )
-        graph_memories = None
+        postprocess_end = time.perf_counter()
+        postprocess_time = postprocess_end - postprocess_start
+
+        embedding_time = float(search_metrics.get("embedding_sec") or 0.0)
+        vector_time = float(search_metrics.get("vector_query_sec") or 0.0) + float(
+            search_metrics.get("vector_postprocess_sec") or 0.0
+        )
+        graph_time = float(search_metrics.get("graph_query_sec") or 0.0)
+        accounted_time = embedding_time + vector_time + graph_time + postprocess_time
+        overhead_time = max(0.0, search_duration - accounted_time)
+
+        cache_hit = search_metrics.get("embedding_cache_hit")
+        cache_note = f", cache_hit={cache_hit}" if cache_hit is not None else ""
+        retry_note = f", retry_sleeps={['%.2f' % s for s in retry_sleeps]}" if retry_sleeps else ""
+
+        load_note = ""
+        load_tuple = None
+        if hasattr(os, "getloadavg"):
+            try:
+                load_tuple = os.getloadavg()
+                load_note = f", load_avg=({load_tuple[0]:.1f},{load_tuple[1]:.1f},{load_tuple[2]:.1f})"
+            except (OSError, ValueError):
+                load_tuple = None
+
+        message = (
+            f"Search success for user {user_id} in {search_duration:.2f}s "
+            f"(attempts={attempts}, retry_sleep={sleep_penalty:.2f}s{cache_note}{retry_note}{load_note}) | "
+            f"breakdown: embedding={embedding_time:.2f}s, vector={vector_time:.2f}s, "
+            f"graph={graph_time:.2f}s, postprocess={postprocess_time:.2f}s, other={overhead_time:.2f}s"
+        )
+        self.logger.info(message)
+
+        if load_tuple and load_tuple[0] >= 200:
+            self.logger.warning(
+                "High system load detected during search for user %s (1m=%.1f, 5m=%.1f, 15m=%.1f). "
+                "Embedding concurrency capped at %s to mitigate pressure.",
+                user_id,
+                load_tuple[0],
+                load_tuple[1],
+                load_tuple[2],
+                getattr(self.memory, "_max_inflight_embeddings", "n/a"),
+            )
+
+        graph_memories = graph_payload
 
         return semantic_memories, graph_memories, search_duration
     
