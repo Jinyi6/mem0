@@ -7,9 +7,11 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 import uuid
 import warnings
+from collections import OrderedDict
 from copy import deepcopy
 from contextlib import contextmanager
 from datetime import datetime
@@ -172,6 +174,12 @@ class Memory(MemoryBase):
         self.api_version = self.config.version
 
         self.enable_graph = False
+
+        self._max_inflight_embeddings = max(1, min(self._default_executor_workers, 3))
+        self._embed_semaphore = threading.Semaphore(self._max_inflight_embeddings)
+        self._embedding_cache_capacity = 512
+        self._embedding_cache = OrderedDict()
+        self._embedding_cache_lock = threading.Lock()
 
         if self.config.graph_store.config:
             provider = self.config.graph_store.provider
@@ -953,23 +961,52 @@ Status: {status}
             },
         )
 
+        aggregated_metrics: Dict[str, float] = {}
+
         with self._executor("mem0-search") as executor:
             future_memories = executor.submit(
                 self._search_vector_store, query, effective_filters, limit, threshold
             )
             future_graph_entities = (
-                executor.submit(self.graph.search, query, effective_filters, limit) if self.enable_graph else None
+                executor.submit(self._graph_search_with_metrics, query, effective_filters, limit)
+                if self.enable_graph
+                else None
             )
 
             concurrent.futures.wait(
                 [future_memories, future_graph_entities] if future_graph_entities else [future_memories]
             )
 
-            original_memories = future_memories.result()
-            graph_entities = future_graph_entities.result() if future_graph_entities else None
+            vector_result = future_memories.result()
+            if (
+                isinstance(vector_result, tuple)
+                and len(vector_result) == 2
+                and isinstance(vector_result[1], dict)
+            ):
+                original_memories, vector_metrics = vector_result
+            else:
+                original_memories, vector_metrics = vector_result, {}
+
+            graph_entities = None
+            graph_metrics: Dict[str, float] = {}
+            if future_graph_entities:
+                graph_result = future_graph_entities.result()
+                if (
+                    isinstance(graph_result, tuple)
+                    and len(graph_result) == 2
+                    and isinstance(graph_result[1], dict)
+                ):
+                    graph_entities, graph_metrics = graph_result
+                else:
+                    graph_entities, graph_metrics = graph_result, {}
+
+        aggregated_metrics.update(vector_metrics or {})
+        aggregated_metrics.update({k: v for k, v in (graph_metrics or {}).items() if k not in aggregated_metrics})
+
+        payload = {"results": original_memories, "metrics": aggregated_metrics}
 
         if self.enable_graph:
-            return {"results": original_memories, "relations": graph_entities}
+            payload["relations"] = graph_entities
 
         if self.api_version == "v1.0":
             warnings.warn(
@@ -979,13 +1016,53 @@ Status: {status}
                 category=DeprecationWarning,
                 stacklevel=2,
             )
-            return {"results": original_memories}
-        else:
-            return {"results": original_memories}
+        return payload
+
+    def _get_cached_embedding(self, query: str):
+        with self._embedding_cache_lock:
+            cached = self._embedding_cache.get(query)
+            if cached is None:
+                return None
+            self._embedding_cache.move_to_end(query)
+            return list(cached)
+
+    def _store_cached_embedding(self, query: str, embeddings):
+        if embeddings is None:
+            return
+        frozen = tuple(embeddings)
+        with self._embedding_cache_lock:
+            if query in self._embedding_cache:
+                self._embedding_cache.move_to_end(query)
+                return
+            self._embedding_cache[query] = frozen
+            while len(self._embedding_cache) > self._embedding_cache_capacity:
+                self._embedding_cache.popitem(last=False)
 
     def _search_vector_store(self, query, filters, limit, threshold: Optional[float] = None):
-        embeddings = self.embedding_model.embed(query, "search")
+        metrics = {}
+        task_start = time.perf_counter()
+
+        cache_lookup_start = time.perf_counter()
+        embeddings = self._get_cached_embedding(query)
+        cache_lookup_end = time.perf_counter()
+        metrics["embedding_cache_lookup_sec"] = cache_lookup_end - cache_lookup_start
+
+        if embeddings is not None:
+            metrics["embedding_cache_hit"] = True
+            metrics["embedding_sec"] = 0.0
+        else:
+            metrics["embedding_cache_hit"] = False
+            embed_start = time.perf_counter()
+            with self._embed_semaphore:
+                embeddings = self.embedding_model.embed(query, "search")
+            embed_end = time.perf_counter()
+            metrics["embedding_sec"] = embed_end - embed_start
+            self._store_cached_embedding(query, embeddings)
+
+        vector_start = time.perf_counter()
         memories = self.vector_store.search(query=query, vectors=embeddings, limit=limit, filters=filters)
+        vector_end = time.perf_counter()
+        metrics["vector_query_sec"] = vector_end - vector_start
 
         promoted_payload_keys = [
             "user_id",
@@ -998,6 +1075,7 @@ Status: {status}
         core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", *promoted_payload_keys}
 
         original_memories = []
+        post_start = time.perf_counter()
         for mem in memories:
             memory_item_dict = MemoryItem(
                 id=mem.id,
@@ -1019,7 +1097,21 @@ Status: {status}
             if threshold is None or mem.score >= threshold:
                 original_memories.append(memory_item_dict)
 
-        return original_memories
+        post_end = time.perf_counter()
+        metrics["vector_postprocess_sec"] = post_end - post_start
+        metrics["vector_total_task_sec"] = post_end - task_start
+
+        return original_memories, metrics
+
+    def _graph_search_with_metrics(self, query, filters, limit):
+        metrics = {}
+        task_start = time.perf_counter()
+        graph_start = time.perf_counter()
+        results = self.graph.search(query, filters, limit)
+        graph_end = time.perf_counter()
+        metrics["graph_query_sec"] = graph_end - graph_start
+        metrics["graph_total_task_sec"] = graph_end - task_start
+        return results, metrics
 
     def update(self, memory_id, data):
         """
