@@ -367,6 +367,10 @@ def main():
             config.get("add_params", {}).get("batch_size")
             or exp_params.get("batch_size")
         )
+        add_mode_value = (
+            config.get("add_params", {}).get("add_mode")
+            or exp_params.get("add_mode")
+        )
         add_command = [
             "python", "-u", "./run_experiments.py",
             "--method", "add",
@@ -383,6 +387,8 @@ def main():
         ]
         if add_batch_size is not None:
             append_arg(add_command, "--batch_size", str(add_batch_size))
+        if add_mode_value is not None:
+            append_arg(add_command, "--add_mode", str(add_mode_value))
         append_arg(add_command, "--llm_model", add_llm_model)
         append_arg(add_command, "--llm_base_url", add_llm_base_url)
         append_arg(add_command, "--llm_api_key", add_llm_api_key)

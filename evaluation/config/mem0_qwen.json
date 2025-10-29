@@ -47,7 +47,8 @@
   },
   "add_params": {
     "max_workers": 25,
-    "batch_size": 32
+    "batch_size": 32,
+    "add_mode": "0"
   },
   "search_params": {
     "max_workers": 25

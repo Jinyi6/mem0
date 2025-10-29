@@ -156,6 +156,7 @@ class MemoryADD:
         self.figure_view = kwargs.get("figure_view", False)
         self.fact_extraction_mode = self._normalize_mode(kwargs.get("fact_extraction_mode", "0"))
         self.memory_decision_mode = self._normalize_mode(kwargs.get("memory_decision_mode", "0"))
+        self.add_mode = self._normalize_mode(kwargs.get("add_mode", "0"))
         self.llm_model = llm_model
 
         qdrant_path = config["vector_store"]["config"]["path"]
@@ -361,13 +362,21 @@ class MemoryADD:
         message_pbar=None,
         update_progress=True,
     ):
+        overlap_mode = self.add_mode == "1"
         for i in range(0, len(messages), self.batch_size):
-            batch_messages = messages[i : i + self.batch_size]
+            start_index = i
+            if overlap_mode and i > 0:
+                start_index = max(0, i - 1)
+            end_index = min(len(messages), i + self.batch_size)
+            batch_messages = messages[start_index:end_index]
             metadata = self._build_timestamp_metadata(timestamp)
             self.add_memory(speaker, batch_messages, metadata=metadata or None)
             if message_pbar and update_progress:
+                increment = len(batch_messages)
+                if overlap_mode and i > 0:
+                    increment = max(0, increment - 1)
                 with self._pbar_lock:
-                    message_pbar.update(len(batch_messages))
+                    message_pbar.update(increment)
 
     def process_conversation(self, item, idx, session_pbar=None, message_pbar=None):
 

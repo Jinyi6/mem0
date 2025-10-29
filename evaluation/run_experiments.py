@@ -58,6 +58,7 @@ def main():
     parser.add_argument("--embedder_api_key", type=str, default=None, help="API key for embedder provider")
     parser.add_argument("--embedder_dims", type=int, default=None, help="Output dimensionality for the embedder model")
     parser.add_argument("--batch_size", type=int, default=6, help="Batch size for MemoryADD ingestion")
+    parser.add_argument("--add_mode", type=str, default="0", help="Memory ingestion overlap mode")
 
     args = parser.parse_args()
 
@@ -163,6 +164,7 @@ def main():
                 qdrant_path=args.qdrant_path,
                 fact_extraction_mode=args.fact_extraction_mode,
                 memory_decision_mode=args.memory_decision_mode,
+                add_mode=args.add_mode,
                 collection_name=args.collection_name,
                 llm_config=add_llm_config,
                 embedder_config=embedder_config,
