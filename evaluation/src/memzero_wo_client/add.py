@@ -186,6 +186,9 @@ class MemoryADD:
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_3
 
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_3
+        elif self.fact_extraction_mode == "5":
+            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_5
+            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_5
         elif self.fact_extraction_mode == "10":
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_10
 
@@ -209,6 +212,12 @@ class MemoryADD:
         elif self.memory_decision_mode == "10":
             from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_10
             config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_10
+        elif self.memory_decision_mode == "11":
+            from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_11
+            config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_11
+        elif self.memory_decision_mode == "5":
+            from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_5
+            config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_5
         # please modify the prompt in mem0/configs/prompts.py if you want to change the memory decision prompt
 
         self._max_parallelism_cap = max(1, min(os.cpu_count() or 4, 12))

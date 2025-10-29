@@ -363,6 +363,10 @@ def main():
             config.get("add_params", {}).get("max_workers")
             or exp_params.get("max_workers", 4)
         )
+        add_batch_size = (
+            config.get("add_params", {}).get("batch_size")
+            or exp_params.get("batch_size")
+        )
         add_command = [
             "python", "-u", "./run_experiments.py",
             "--method", "add",
@@ -377,6 +381,8 @@ def main():
             "--max_workers", str(add_max_workers),
             "--collection_name", collection_name,
         ]
+        if add_batch_size is not None:
+            append_arg(add_command, "--batch_size", str(add_batch_size))
         append_arg(add_command, "--llm_model", add_llm_model)
         append_arg(add_command, "--llm_base_url", add_llm_base_url)
         append_arg(add_command, "--llm_api_key", add_llm_api_key)

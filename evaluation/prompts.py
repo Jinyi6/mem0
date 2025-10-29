@@ -378,71 +378,96 @@ Question: {{question}}
 Your step-by-step analysis and final answer: (Note that you should provide your final answer on the last line after your analysis followed by 2 blank lines)
 """
 
+# 贺斌最好的版本
 ANSWER_PROMPT_5 = """
-You are a meticulous and logical memory analyst. Your sole purpose is to answer a user's question based ONLY on the provided conversation memories. You must operate with extreme precision and adhere strictly to the rules.
+    You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories.
 
-# GUIDING PRINCIPLES:
-1.  **Evidence is Primary**: Your answer MUST be directly supported by evidence within the memories. Do not invent or guess.
-2.  **Human Intent Over Literalism**: Do not default to the narrowest possible definition of a word. Interpret concepts based on common human understanding.
-    * Example A (Events): A query about "family visits" can include informal events like "chilling together with a sister."
-    * Example B (Actions): A query about "studying together" can include activities like "discussing chess strategies" or "working on a coding project together," as these are forms of collaborative learning.
-3.  **Address the Premise**: If the user's question contains a factual premise that is contradicted by the memories (e.g., asking about an event that never occurred), you must first state that the premise is incorrect, and then provide the correct, related information if available.
+    # CONTEXT:
+    You have access to memories from two speakers in a conversation. These memories contain 
+    timestamped information that may be relevant to answering the question.
 
-# CORE INSTRUCTIONS:
-1.  **Analyze All Memories Exhaustively**: Your primary task is to find ALL relevant pieces of information. A partial search is a critical failure.
-2.  **CRITICAL - Verify Fact Attribution**: Before any analysis, ensure every piece of evidence is correctly attributed to the right person or entity. Misattributing a fact (e.g., saying John did something when the memory says James did it) is the most severe error. Double-check names and subjects for every fact.
-3.  **Exhaustive Collation for Lists**: For questions asking for a list of items (e.g., "what games," "list all..."), your search MUST be exhaustive. Collate all distinct items from all memories.
-4.  **Timestamp is Key**: Timestamps are crucial for context, resolving contradictions, and performing calculations.
-5.  **Handle Contradictions (Time Priority)**: If memories contain conflicting factual information, you MUST prioritize the memory with the most recent timestamp as the current truth.
-6.  **Prioritize Definitive Language**: Give higher weight to definitive or superlative terms. "Favorite game" is a stronger claim than "likes playing." If asked for a "favorite," only list what is explicitly called a favorite.
-7.  **Rule on Inference and External Knowledge**:
-    * **Default - No Direct Inference**: Do not infer information that is not explicitly stated. However, two specific, limited exceptions are allowed under strict conditions:
-    * **Exception A - Geographic Containment**: You may use external knowledge ONLY for confirming hierarchical geographic locations (e.g., city in a state/country).
-    * **Exception B - High-Probability Inference**: You may infer a likely situation (e.g., residency) or a broad action (e.g., "studying") ONLY IF:
-        a) The inference is based on a significant, directly stated action or multiple pieces of contextual evidence.
-        b) The conclusion is phrased probabilistically ("Likely yes," "It is implied that...").
-        c) You MUST explicitly state that this is an inference and list the specific evidence supporting it.
-        * **Residency Example**: To answer "Does James live in Connecticut?", if a memory states "James adopted a dog from a shelter in Stamford," you can infer he likely lives in Connecticut. Your reasoning must state: "This is a high-probability inference, as adopting a pet is a significant local action that strongly implies residency nearby."
-        * **Action Example**: To answer "Did they study together?", if a memory states "they spent the afternoon discussing chess strategies," you can apply the "Human Intent" principle and infer that they did study together in a broad sense.
-8.  **Information Gaps**: If, after an exhaustive search and applying the allowed inference rules, the information is not present, you MUST state that the answer cannot be determined.
+    # INSTRUCTIONS:
+    1. Carefully analyze all provided memories from both speakers
+    2. Pay special attention to the timestamps to determine the answer
+    3. If the question asks about a specific event or fact, look for direct evidence in the memories
+    4. If the memories contain contradictory information, prioritize the most recent memory
+    5. If there is a question about time references (like "last year", "two months ago", etc.), 
+       calculate the actual date based on the memory timestamp. For example, if a memory from 
+       4 May 2022 mentions "went to India last year," then the trip occurred in 2021.
+    6. Always convert relative time references to specific dates, months, or years. For example, 
+       convert "last year" to "2022" or "two months ago" to "March 2023" based on the memory 
+       timestamp. Ignore the reference while answering the question.
+    7. Focus only on the content of the memories from both speakers. Do not confuse character 
+       names mentioned in memories with the actual users who created those memories.
+    8. The answer should be less than 5-6 words.
+    9. When you can’t find evidence, the question may be an inference question. In that case, use common sense and reasoning to answer—don’t refuse.
 
-# STEP-BY-STEP ANALYSIS APPROACH (Think step by step and write it down before the final answer):
-1.  **Initial Search & Premise Check**:
-    * Identify keywords and core intent, applying the expanded "Human Intent" principle.
-    * Check if the question's premise is factually correct based on the memories.
-    * Perform a broad search to gather ALL potentially relevant memory snippets.
+    # APPROACH (Think step by step):
+    1. First, examine all memories that contain information related to the question
+    2. Examine the timestamps and content of these memories carefully
+    3. Look for explicit mentions of dates, times, locations, or events that answer the question
+    4. If the answer requires calculation (e.g., converting relative time references), show your work
+    5. Formulate a precise, concise answer based solely on the evidence in the memories
+    6. Double-check that your answer directly addresses the question asked
+    7. Ensure your final answer is specific and avoids vague time references
 
-2.  **Evidence Extraction & Fact Attribution**:
-    * List all relevant memory snippets, quoting them exactly with timestamps.
-    * **CRITICAL VERIFICATION STEP**: For each snippet, explicitly name the person/entity performing the action (e.g., "Fact 1 from Memory X: **James** adopted a pup."). This prevents entity confusion.
+    **Note. Time Calculation (Simplified Rules):**
+    
+    * **Pre-check for date questions**: Before writing the final answer, verify that your handling of time expressions follows the rules below.
+    
+    * **Weekday-based expressions** (e.g., "last Friday", "this Tuesday", "next weekend"): **never compute an absolute calendar date**. Answer using a **relative phrase anchored to the memory’s timestamp**.
+    
+      **Standard format QA examples:**
+    
+      * **Q:** The memory (timestamp **14 August 2023**) says the event was **“last Friday.”** How should I state the time?
+        **A:** **“last Friday before 14 August 2023.”**
+      * **Q:** The memory (timestamp **17 July 2023**) mentions **“this Tuesday.”** How should I state the time?
+        **A:** **“the Tuesday after 17 July 2023.”**
+    
+    * **Non-weekday relative expressions** that can be computed **without calendar lookup** (e.g., "yesterday", "last month", "last year"): you **may convert** to an absolute value when the year/month/day can be derived directly from the timestamp.
+    
+    QA examples (memory timestamp: 2023-08-14):
+    
+    Q: What is “yesterday”?
+    A: 2023-08-13
+    (Anti-example ❌: yesterday of 2023-08-13.”**)
+    Q: What is “last month”?
+    A: 2023-07
+    (Anti-example ❌: last month of 2023-08.”**)
+    Q: What is “last year”?
+    A: 2022
+    (Anti-example ❌: last year of 2023.”**)
+    * **Time granularity**: Do not over-specify. Keep vague phrases ("last week", "recently", "a few months ago") as-is and anchor them to the timestamp.
+    Q: The memory says “last week.” What date is that?
+    A: Do **not** compute exact dates. Answer as **“last week before 2023-08-14.”**
+    (Anti-example ❌: specifying exact dates like **“2023-08-07 to 2023-08-13.”**)
 
-3.  **Critical Analysis & Synthesis**:
-    * **A. Fact Reconciliation**: Compare all extracted facts. Double-check for any misattributions. For example, if one memory says James adopted Ned and the question is about John, identify this discrepancy immediately.
-    * **B. Time Calculation**: Analyze any relative time references, converting ambiguous terms like "last week" to a natural range (e.g., "the first week of April").
-    * **C. Contradiction Resolution**: Apply Instruction #5 (Time Priority) if there are direct factual conflicts.
-    * **D. Synthesis & Inference Application**:
-        * Combine the verified facts.
-        * Apply Instruction #6 (Prioritize Definitive Language).
-        * Consider if the conditions for `High-Probability Inference` (Instruction #7B) are met. If you use this rule, state it clearly in your reasoning.
+    * **Conversation time vs. event time**: Distinguish carefully. If the question asks **when the event happened**, do not answer with the conversation time.
+    
+      **QA example (two memories):**
+      *Memory A (timestamp **14 August 2023**): “Went to the city **last Friday**.”*
+      *Memory B (timestamp **16 August 2023**): “**Will go again next Tuesday.**”*
+    
+      **Q:** When did they go to the city?
+      **A:** **“last Friday before 14 August 2023.”**
+      **Anti-examples ❌:**
+      • “On **16 August 2023**” (this is the conversation/memory time, not the event time).
+    * **Tense**: Ensure past/future tense matches the event.
+      **Anti-examples ❌:**
+      • “They went last Friday **and will go again next Tuesday**” (the question asks only about the past event).
+    
+    Memories for user {{speaker_1_user_id}}:
 
-4.  **Final Answer Formulation**:
-    * **A. Synthesize Findings**: Formulate a direct answer. If addressing a faulty premise, do so first. Use probabilistic language ("likely," "it is implied") if your answer is based on an allowed inference.
-    * **B. Final Check**: Review your answer against your verified facts. Is it 100% supported? Is the entity attribution correct? Have all rules been followed?
+    {{speaker_1_memories}}
 
----
+    Memories for user {{speaker_2_user_id}}:
 
-Memories for user {{speaker_1_user_id}}:
+    {{speaker_2_memories}}
 
-{{speaker_1_memories}}
+    Question: {{question}}
 
-Memories for user {{speaker_2_user_id}}:
-
-{{speaker_2_memories}}
-
-Question: {{question}}
-
-Your step-by-step analysis and final answer: (Note that you should provide your final answer on the last line after your analysis followed by 2 blank lines)
-"""
+    Answer:
+    """
 
 ANSWER_PROMPT_6 = """
 You are a meticulous and logical memory analyst. Your sole purpose is to answer the user's question based ONLY on the provided conversation memories. Do not invent or guess beyond the limited inference rules below.

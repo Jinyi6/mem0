@@ -57,6 +57,7 @@ def main():
     parser.add_argument("--embedder_base_url", type=str, default=None, help="Base URL for embedder provider API")
     parser.add_argument("--embedder_api_key", type=str, default=None, help="API key for embedder provider")
     parser.add_argument("--embedder_dims", type=int, default=None, help="Output dimensionality for the embedder model")
+    parser.add_argument("--batch_size", type=int, default=6, help="Batch size for MemoryADD ingestion")
 
     args = parser.parse_args()
 
@@ -155,6 +156,7 @@ def main():
         if args.method == "add":
             memory_manager = MemoryADD(
                 data_path=f"./dataset/{args.dataset_name}.json", 
+                batch_size=args.batch_size,
                 is_graph=args.is_graph, 
                 logger=logger,
                 figure_view=args.figure_view, 

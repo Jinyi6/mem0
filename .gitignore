@@ -41,6 +41,8 @@ evaluation/dataset/membench_mem0
 evaluation/config/.api
 evaluation/scripts/evaluate_old_results.py
 mem0_init_version
+evaluation/config/mem0_qwen_41.json
+t.py
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

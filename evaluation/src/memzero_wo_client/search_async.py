@@ -346,7 +346,6 @@ class MemorySearch:
                 self.ANSWER_PROMPT = ANSWER_PROMPT_4
             elif answer_mode == "5":
                 from prompts import ANSWER_PROMPT_5
-
                 self.ANSWER_PROMPT = ANSWER_PROMPT_5
             elif answer_mode == "6":
                 from prompts import ANSWER_PROMPT_6
@@ -363,6 +362,9 @@ class MemorySearch:
             else:
                 self.logger.warning("Unknown answer_mode '%s'. Falling back to default prompt.", answer_mode)
                 self.ANSWER_PROMPT = ANSWER_PROMPT
+
+        self.speaker_1_full_memories = []
+        self.speaker_2_full_memories = []
             
     @staticmethod
     def _derive_collection_name(qdrant_path: str) -> str:
@@ -484,7 +486,7 @@ class MemorySearch:
         return resolved
 
 
-    def search_memory(self, user_id, query, max_retries=5, pbar=None):
+    def search_memory(self, user_id, query, max_retries=5, pbar=None, limit=None):
         """
         搜索指定用户的记忆
         
@@ -497,6 +499,8 @@ class MemorySearch:
         Returns:
             tuple: (semantic_memories, graph_memories, search_time)
         """
+        if limit is None:
+            limit = self.top_k
         start_time = time.perf_counter()
         sleep_penalty = 0.0
         attempts = 0
@@ -508,7 +512,7 @@ class MemorySearch:
                 memory_payload = self.memory.search(
                     query,
                     user_id=user_id,
-                    limit=self.top_k,
+                    limit=limit,
                 )
                 break
             except Exception as e:
@@ -720,6 +724,63 @@ class MemorySearch:
                     time.sleep(sleep_time)
                     continue
                 raise
+
+    def __load_full_memories(self, speaker_1_user_id, speaker_2_user_id):
+        t1 = time.time()
+        speaker1full = self.search_memory(user_id=speaker_1_user_id, query="get all", limit=500)
+        t2 = time.time()
+
+        print(f'Load full memories in speaker 1 cost {t2-t1} seconds')
+
+        t1 = time.time()
+        speaker2full = self.search_memory(user_id=speaker_2_user_id, query="get all", limit=500)
+        t2 = time.time()
+
+        print(f'Load full memories in speaker 1 cost {t2-t1} seconds')
+
+        # for item in speaker1full:
+        #     record = str(item['timestamp'] + ' : ' + item['memory'])
+        #     self.speaker_1_full_memories.append(record)
+        #
+        # for item in speaker2full:
+        #     record = str(item['timestamp'] + ' : ' + item['memory'])
+        #     self.speaker_2_full_memories.append(record)
+
+    def vibe_rerank(self, question, documents , top_k=30) -> list:
+        docs_with_idx = "\n".join([f"[{i}] {d}" for i, d in enumerate(documents)])
+        prompt = f"""You are an intelligent reranker.
+                    Question: {question}
+                    Documents:
+                    {docs_with_idx}
+                    Please identify the most relevant documents. 
+                    If there are no such texts just return "Not found"
+                    Return only the indices in parentheses, e.g. (2,5,1)
+                    Top indices:"""
+        raw=""
+        try:
+            resp = self.safe_chat(
+                model=self.llm_model,
+                messages=[{"role": "system", "content": prompt}],
+                temperature=0.8,
+            )
+            if resp.choices[0].message.content is not None:
+                raw = resp.choices[0].message.content.strip()
+
+            nums = re.findall(r'\d+', raw)
+            indices = []
+            seen = set()
+            for n in nums:
+                idx = int(n)
+                if idx not in seen and 0 <= idx < len(documents):
+                    indices.append(idx)
+                    seen.add(idx)
+            if not indices:
+                raise ValueError("No valid indices parsed")
+            return indices[:top_k]
+
+        except Exception as e:
+            print(f"[vibe_rerank] {e} | raw LLM output: {raw[:80]}...")
+            return []
 
 
     def Search(self, speaker_1_user_id, speaker_2_user_id, question, search_method, top_k_rerank=15, pbar=None):
@@ -1156,6 +1217,41 @@ class MemorySearch:
                 speaker_1_time,
                 speaker_2_time,
             )
+        elif search_method == "6":
+            if not len(self.speaker_1_full_memories) or not len(self.speaker_2_full_memories):
+                self.__load_full_memories(speaker_1_user_id, speaker_2_user_id)
+
+            speaker_1_indexs = self.vibe_rerank(question=question, documents=self.speaker_1_full_memories, top_k=top_k_rerank)
+            speaker_2_indexs = self.vibe_rerank(question=question, documents=self.speaker_2_full_memories, top_k=top_k_rerank)
+
+            speaker_1_memory = []
+            speaker_2_memory = []
+
+            if not speaker_1_indexs:
+                speaker_1_memories, speaker_1_graph_memories, speaker_1_memory_time = self.search_memory(
+                     speaker_1_user_id, question, pbar=pbar
+                 )
+                search_1_memory = [f"{item['timestamp']}: {item['memory']}" for item in speaker_1_memories]
+            else:
+                search_1_memory = [self.speaker_1_full_memories[i] for i in speaker_1_indexs]
+
+            if not speaker_2_indexs:
+                speaker_2_memories, speaker_2_graph_memories, speaker_2_memory_time = self.search_memory(
+                     speaker_2_user_id, question, pbar=pbar
+                 )
+                search_2_memory = [f"{item['timestamp']}: {item['memory']}" for item in speaker_2_memories]
+            else:
+                search_2_memory = [self.speaker_2_full_memories[i] for i in speaker_2_indexs]
+
+            return (
+                search_1_memory,
+                search_2_memory,
+                None,
+                None,
+                0.0,
+                0.0,
+            )
+
         elif search_method == "10":
             # ========== 方法7: 问题分解 + 关键词 + 多视角搜索融合 ==========
             MAX_WORKERS = min(4, self._max_parallelism_cap)
