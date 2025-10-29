@@ -104,9 +104,20 @@ def _evaluate_candidates(
     metric_helpers: Dict[str, object],
 ) -> Tuple[str, Dict[str, float]]:
     """Compute metrics for a question/candidate set and select the best answer."""
-
+    
     f1_func = metric_helpers.get("f1")
     bleu_func = metric_helpers.get("bleu")
+
+    if prediction is None or prediction == "":
+        metrics_summary: Dict[str, float] = {}
+        if "llm" in enabled_metrics:
+            metrics_summary["llm_score"] = 0.0
+        if "f1" in enabled_metrics:
+            metrics_summary["f1_score"] = 0.0
+        if "bleu" in enabled_metrics:
+            metrics_summary["bleu_score"] = 0.0
+
+        return "skip", metrics_summary
 
     best_answer = ""
     selection_metric = "llm" if "llm" in enabled_metrics else (
@@ -210,6 +221,7 @@ def process_single_item(
     pred_answer = str(item["response"])
     if "Final Answer:" in pred_answer:
         pred_answer = pred_answer.split("Final Answer:", 1)[1].strip()
+
     category = str(item["category"])
     question = str(item["question"])
 
