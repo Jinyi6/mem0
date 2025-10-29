@@ -128,17 +128,31 @@ Status: {status}
     
     def _answer_question_with_full_context(self, conversation_history, question, max_retries=5):
         """Calls the LLM with the full context to get an answer."""
-        prompt_components = {
-            "conversation_history": conversation_history,
-            "question": question,
-        }
-        answer_prompt = self.template.render(prompt_components)
-        
         request_id = f"full-context-q-{uuid.uuid4()}"
         response_content = None
         start_time = time.time()
+        max_context_exceeded = 0
+        max_trim_attempts = 5
+        trim_attempts = 0
 
-        for attempt in range(1, max_retries + 1):
+        conversation_lines = conversation_history.splitlines()
+        total_lines = len(conversation_lines)
+        current_length = total_lines if total_lines > 0 else 0
+
+        def build_prompt(length):
+            history_slice = "\n".join(conversation_lines[:length]) if length else ""
+            prompt_components_local = {
+                "conversation_history": history_slice,
+                "question": question,
+            }
+            rendered_prompt = self.template.render(prompt_components_local)
+            return history_slice, prompt_components_local, rendered_prompt
+
+        current_history_str, prompt_components, answer_prompt = build_prompt(current_length)
+
+        attempt = 0
+        while attempt < max_retries:
+            attempt += 1
             try:
                 response = self.openai_client.chat.completions.create(
                     model=self.model_name,
@@ -146,26 +160,81 @@ Status: {status}
                     temperature=0.0
                 )
                 response_content = response.choices[0].message.content
-                self._log_llm_call(request_id, attempt, max_retries, prompt_components, answer_prompt, response_content, "Success")
-                break # Success, exit loop
+                self._log_llm_call(
+                    request_id,
+                    attempt,
+                    max_retries,
+                    prompt_components,
+                    answer_prompt,
+                    response_content,
+                    "Success",
+                )
+                break  # Success, exit loop
             except Exception as e:
                 error_message = f"LLM API call failed. Error: {e}"
+                error_lower = str(e).lower()
+                is_context_error = "maximum context length" in error_lower
                 status_c = "Failed Attempt"
-                ap = answer_prompt
+
+                if is_context_error:
+                    max_context_exceeded = 1
+                if (
+                    is_context_error
+                    and trim_attempts < max_trim_attempts
+                    and current_length > 0
+                ):
+                    trim_attempts += 1
+                    trim_size = max(1, int(current_length * 0.1))
+                    current_length = max(0, current_length - trim_size)
+                    current_history_str, prompt_components, answer_prompt = build_prompt(current_length)
+                    trim_message = (
+                        f"{error_message} | Reducing conversation history by 10% "
+                        f"(trim attempt {trim_attempts}/{max_trim_attempts})."
+                    )
+                    self._log_llm_call(
+                        request_id,
+                        attempt,
+                        max_retries,
+                        prompt_components,
+                        "",  # Avoid logging large prompt repeatedly
+                        trim_message,
+                        status_c,
+                    )
+                    # Retry immediately without additional wait.
+                    continue
+
                 if attempt >= max_retries:
                     status_c = "Failed Attempt (END)"
-                    ap = answer_prompt
-                    error_message = f"Request ID [{request_id}] - LLM call failed permanently after {max_retries} attempts."
+                    error_message = (
+                        f"Request ID [{request_id}] - LLM call failed permanently after {max_retries} attempts."
+                    )
                     response_content = "Error: Failed to get response from LLM."
-                else:
-                    sleep_time = random.uniform(45, 75)
-                    ap = ""  # Clear prompt to avoid logging large content repeatedly
-                    status_c += f", retrying in {sleep_time:.2f} seconds..."
-                    time.sleep(sleep_time)
-                self._log_llm_call(request_id, attempt, max_retries, prompt_components, ap, error_message, status_c)
+                    self._log_llm_call(
+                        request_id,
+                        attempt,
+                        max_retries,
+                        prompt_components,
+                        "",
+                        error_message,
+                        status_c,
+                    )
+                    break
+
+                sleep_time = random.uniform(45, 75)
+                status_c += f", retrying in {sleep_time:.2f} seconds..."
+                self._log_llm_call(
+                    request_id,
+                    attempt,
+                    max_retries,
+                    prompt_components,
+                    "",
+                    error_message,
+                    status_c,
+                )
+                time.sleep(sleep_time)
 
         response_time = time.time() - start_time
-        return response_content, response_time, answer_prompt
+        return response_content, response_time, answer_prompt, max_context_exceeded
 
     def _process_single_question(self, conversation_item, question_item, idx, pbar):
         """Worker function to process one question using its conversation context."""
@@ -174,7 +243,9 @@ Status: {status}
         category = question_item.get("category", -1)
 
         conversation_history = self._format_conversation(conversation_item["conversation"])
-        response, response_time, answer_prompt = self._answer_question_with_full_context(conversation_history, question)
+        response, response_time, answer_prompt, max_context_flag = self._answer_question_with_full_context(
+            conversation_history, question
+        )
 
         result = {
             "question": question,
@@ -183,6 +254,7 @@ Status: {status}
             "response": response,
             "response_time": response_time,
             "answer_prompt": answer_prompt,
+            "max_context_exceeded": max_context_flag,
         }
 
         # The lock is now only held for a very short time to do a quick memory update.

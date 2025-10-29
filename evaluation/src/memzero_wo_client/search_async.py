@@ -567,24 +567,16 @@ class MemorySearch:
         semantic_memories = []
         for memory in raw_memories:
             metadata = memory.get("metadata") or {}
-            timestamp_iso = metadata.get("timestamp") or memory.get("created_at")
-            timestamp_original = metadata.get("timestamp_original")
+            timestamp_value = metadata.get("timestamp")
+            if timestamp_value is None:
+                timestamp_value = memory.get("created_at")
             timestamp_epoch = metadata.get("timestamp_epoch")
-
-            if timestamp_epoch is None and timestamp_iso:
-                try:
-                    parsed_dt = datetime.fromisoformat(str(timestamp_iso).replace("Z", "+00:00"))
-                    if parsed_dt.tzinfo is None:
-                        parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
-                    timestamp_epoch = parsed_dt.timestamp()
-                except Exception:
-                    timestamp_epoch = None
 
             semantic_memories.append(
                 {
                     "memory": memory["memory"],
-                    "timestamp": timestamp_iso,
-                    "timestamp_display": timestamp_original or timestamp_iso,
+                    "timestamp": timestamp_value,
+                    "timestamp_display": timestamp_value,
                     "timestamp_epoch": timestamp_epoch,
                     "score": round(memory["score"], 2),
                 }

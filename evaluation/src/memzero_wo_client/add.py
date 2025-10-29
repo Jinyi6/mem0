@@ -8,9 +8,6 @@ import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 import traceback
-from datetime import datetime
-
-import pytz
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -90,7 +87,6 @@ class _StreamingDataset:
 
 
 class MemoryADD:
-    PACIFIC_TZ = pytz.timezone("US/Pacific")
     def __init__(self, data_path=None, batch_size=6, is_graph=False, logger=None, **kwargs):
         llm_config = kwargs.get("llm_config") or {}
         embedder_config = kwargs.get("embedder_config") or {}
@@ -258,56 +254,13 @@ class MemoryADD:
             normalized = "0"
         return normalized
 
-    @classmethod
-    def _canonicalize_timestamp(cls, timestamp_value):
-        """
-        Convert incoming timestamps into timezone-aware datetimes in US/Pacific.
-        """
-        if timestamp_value in (None, ""):
-            return None
-
-        text = str(timestamp_value).strip()
-        if not text:
-            return None
-
-        # Attempt to parse the dataset-specific format first (e.g., "1:56 pm on 8 May, 2023")
-        try:
-            cleaned = re.sub(r"\b(am|pm)\b", lambda m: m.group(1).upper(), text, flags=re.IGNORECASE)
-            parsed = datetime.strptime(cleaned, "%I:%M %p on %d %B, %Y")
-            return cls.PACIFIC_TZ.localize(parsed)
-        except Exception:
-            pass
-
-        # Attempt ISO formats (supporting trailing 'Z')
-        iso_candidate = text.replace("Z", "+00:00")
-        try:
-            parsed = datetime.fromisoformat(iso_candidate)
-            if parsed.tzinfo is None:
-                return cls.PACIFIC_TZ.localize(parsed)
-            return parsed.astimezone(cls.PACIFIC_TZ)
-        except Exception:
-            pass
-
-        # Attempt epoch seconds
-        try:
-            seconds = float(text)
-            return datetime.fromtimestamp(seconds, tz=cls.PACIFIC_TZ)
-        except Exception:
-            return None
-
     def _build_timestamp_metadata(self, timestamp_value):
         """
         Assemble consistent timestamp metadata for storage.
         """
-        metadata = {}
-        canonical_dt = self._canonicalize_timestamp(timestamp_value)
-        if canonical_dt:
-            metadata["timestamp"] = canonical_dt.isoformat()
-            metadata["timestamp_epoch"] = canonical_dt.timestamp()
-            metadata["timestamp_tz"] = "US/Pacific"
-        if timestamp_value not in (None, ""):
-            metadata["timestamp_original"] = str(timestamp_value)
-        return metadata
+        if timestamp_value in (None, ""):
+            return {}
+        return {"timestamp": str(timestamp_value)}
 
     def load_data(self):
         if not self.data_path:
