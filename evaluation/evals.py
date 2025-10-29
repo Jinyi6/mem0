@@ -214,8 +214,8 @@ def process_single_item(
     question = str(item["question"])
 
     # 跳过指定类别
-    if category == "5":
-        return None  # 返回 None 以便主循环可以跳过它
+    # if category == "5":
+    #     return None  # 返回 None 以便主循环可以跳过它
 
     if all(candidate == "" for candidate in answer_candidates):
         print(f"⚠️ Question '{question[:80]}...' has empty gold answers. Proceeding with empty string fallback.", flush=True)
