@@ -1,8 +1,8 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo10_2",
-    "existing_workspace_dir": "exp_data/locomo10_2/locomo10_2_model_Qwen_Qwen3_14B_top_k_30_filter_False_graph_False_5_11_6_5_20251028_230745"
+    "dataset_name": "locomo1_failed_half",
+    "existing_workspace_dir": ""
   },
   "exp_params": {
     "technique_type": "mem0",
@@ -48,7 +48,7 @@
   "add_params": {
     "max_workers": 25,
     "batch_size": 32,
-    "add_mode": "0"
+    "add_mode": "1"
   },
   "search_params": {
     "max_workers": 25
