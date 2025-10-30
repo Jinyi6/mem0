@@ -1,8 +1,8 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo1_failed_half",
-    "existing_workspace_dir": ""
+    "dataset_name": "longmemeval_d0",
+    "existing_workspace_dir": "exp_data/longmemeval_d0/longmemeval_d0_model_Qwen_Qwen3_14B_top_k_30_filter_False_graph_False_3_1_5_0_20251027_165305"
   },
   "exp_params": {
     "technique_type": "mem0",
@@ -11,10 +11,10 @@
     "filter_memories": false,
     "is_graph": false,
     "figure_view": true,
-    "fact_extraction_mode": "5",
-    "memory_decision_mode": "11",
-    "search_mode": "6",
-    "answer_mode": "5",
+    "fact_extraction_mode": "3",
+    "memory_decision_mode": "1",
+    "search_mode": "5",
+    "answer_mode": "0",
     "llm": {
       "model": "Qwen/Qwen3-14B",
       "base_url": "https://api.siliconflow.cn/v1",
@@ -43,14 +43,13 @@
     }
   },
   "eval_params": {
-    "max_workers": 25
+    "max_workers": 30
   },
   "add_params": {
-    "max_workers": 25,
-    "batch_size": 32,
-    "add_mode": "0"
+    "max_workers": 20,
+    "batch_size": 32
   },
   "search_params": {
-    "max_workers": 25
+    "max_workers": 30
   }
 }
