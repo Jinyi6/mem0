@@ -361,6 +361,9 @@ class MemorySearch:
             elif answer_mode == "12":
                 from prompts import ANSWER_PROMPT_12
                 self.ANSWER_PROMPT = ANSWER_PROMPT_12
+            elif answer_mode == "13":
+                from prompts import ANSWER_PROMPT_13
+                self.ANSWER_PROMPT = ANSWER_PROMPT_13
             else:
                 self.logger.warning("Unknown answer_mode '%s'. Falling back to default prompt.", answer_mode)
                 self.ANSWER_PROMPT = ANSWER_PROMPT
