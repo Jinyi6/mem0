@@ -108,7 +108,7 @@ def _evaluate_candidates(
     f1_func = metric_helpers.get("f1")
     bleu_func = metric_helpers.get("bleu")
 
-    if prediction is None or prediction == "":
+    if candidates is None or candidates == "" or candidates == [] or all(candidate == "" for candidate in candidates):
         metrics_summary: Dict[str, float] = {}
         if "llm" in enabled_metrics:
             metrics_summary["llm_score"] = 0.0
