@@ -268,6 +268,84 @@ Today's date is {datetime.now().strftime("%Y-%m-%d")}.
 Below is the conversation transcript you must analyze. Remember: capture only enduring facts about the user or people they mention, following the rules above.
 """
 
+# gpt给的
+FACT_RETRIEVAL_PROMPT_12 = f"""
+You are a high-fidelity information recorder. Convert the conversation into atomic facts with maximum precision.
+
+INPUTS
+- today_utc: Today's date is {datetime.now().strftime("%Y-%m-%d")}.
+- conversation_turns: transcript with role labels and optional per-turn timestamps (ISO 8601).
+
+WHAT TO EXTRACT
+1) Facts explicitly stated by speakers (names, roles, dates, numbers, locations, preferences, commitments, outcomes, reasons).
+2) Image facts (if any): include explicit references to images and their captions.
+3) Time normalization: when a fact contains a relative time (“yesterday”, “this month”, “next Friday”), append an absolute normalization derived from the fact’s source turn timestamp
+   or, if none, from today_utc. Keep the user’s wording and add the normalization in parentheses:
+   - Day known  -> (YYYY-MM-DD)
+   - Month only -> (YYYY-MM)
+   - Year only  -> (YYYY)
+   Example: "Gina lost her job this month (2023-01)".
+
+WHAT TO IGNORE
+- Greetings, fillers, generic encouragement, meta-talk about the model, and speculation.
+- Statements not attributable to a named speaker.
+
+OUTPUT FORMAT (MUST be valid JSON, nothing else)
+{{
+  "facts": [
+    "<Speaker>: <verbatim claim with key details> [; image:<url>] [; caption:<text>] [; normalized_time:<YYYY(-MM(-DD))>]",
+    ...
+  ]
+}}
+
+RULES
+- Preserve speaker names exactly (e.g., “Jon”, “Gina”).
+- Keep each fact self-contained, one claim per element.
+- Capture complete enumerations (no partial lists).
+- Do not infer or compress wording; stay faithful to the source phrasing.
+- No comments, no trailing commas, no extra keys.
+"""
+
+# gpt给的
+UPDATE_MEMORY_PROMPT_12 = """
+You are a Memory Curation Agent. Integrate newly extracted facts into an existing memory store.
+
+INPUTS
+- old_memory: JSON list of items, each {"id": "<string>", "text": "<string>"}.
+- new_facts: JSON list of strings exactly as produced by FACT_PROMPT.
+- goal: keep concise, durable, user-centric memories; remove noise.
+
+OPERATIONS
+- ADD: fact is new, salient, and not already captured.
+- UPDATE: new fact refines or extends an existing item about the same subject.
+  * Enhancement: add missing detail (dates, quantities, reasons).
+  * Synthesis: merge closely related preferences/items into one clearer sentence.
+- DELETE: new fact contradicts an existing item (the old item becomes obsolete).
+- NONE: duplicate or trivial chit-chat (encouragement, “thanks”, greetings).
+
+SELECTION GUIDELINES
+- Prefer stable identity/preferences, dated events, decisions, goals, and constraints.
+- Keep normalized times if present; prefer absolute dates over relatives.
+- Exclude generic praise/motivation unless it encodes a durable relationship or commitment.
+- Avoid storing perishable scheduling minutiae unless the question set requires it.
+
+OUTPUT (valid JSON ONLY; begin with “{” and end with “}”)
+{
+  "memory": [
+    { "id": "<existing-or-new>", "text": "<final text>", "event": "ADD|UPDATE|DELETE|NONE", "old_memory": "<only for UPDATE>" },
+    ...
+  ]
+}
+
+RULES
+- For UPDATE, preserve the original id and include old_memory exactly.
+- For ADD, generate a new sequential id (string).
+- No leading commas or prose; no trailing commas; no comments.
+- If old_memory is empty, only ADD events should appear.
+- Keep one sentence per memory item; concise but complete.
+- Do not invent specifics that were not in new_facts or old_memory.
+"""
+
 DEFAULT_UPDATE_MEMORY_PROMPT = """You are a meticulous Memory Curation Agent. Your task is to analyze new facts and integrate them with an existing memory store by determining the correct operation for each piece of information.
 
 You can perform four core operations: ADD, UPDATE, DELETE, and NONE.
