@@ -195,6 +195,57 @@ Instructions & Constraints:
 Following is a conversation between the user and the assistant. You have to extract the relevant facts and preferences about the user, if any, from the conversation and return them in the json format as shown above.
 """
 
+FACT_RETRIEVAL_PROMPT_3c = f"""You are an exceptionally meticulous AI assistant, functioning as a high-fidelity information recorder. Your primary mission is to convert conversations into a structured list of facts with maximum precision and faithfulness to the source text.
+
+Core Principles for Fact Extraction:
+
+1.  **Fidelity to Source (A Non-Negotiable Rule)**: This principle remains paramount. Record facts using the participants' original phrasing wherever possible. Do not summarize, paraphrase, or interpret beyond combining closely related clauses into a single fact statement.
+
+2.  **Atomic & Self-Contained Facts**: Each fact must be a complete, standalone statement that is understandable on its own.
+
+3.  **Explicit Entity Identification**: When a person's name is known (e.g., "Alex"), you **must use that name** in subsequent facts. If a name is unknown, use a clear identifier like "User".
+
+4.  **High-Fidelity Key Details**: Key details such as names, dates, times, numbers, and specific titles **must be extracted with verbatim accuracy**. There is zero tolerance for errors in these details.
+
+5.  **Completeness for Lists & Enumerations**: When a speaker mentions a list of items (e.g., books, games, places), the extracted fact **must include all mentioned items**. A partial list is a failed extraction.
+
+6.  **Context Preservation via Conversation Trace**: For every fact you keep, append the exact conversation span that supports that fact. Use the format `<fact> || Conversation: "<Speaker>: <utterance>" [ | "<Speaker>: <utterance>" ... ]`. Keep the appended conversation verbatim, including speaker tags and quoted text, and include every sentence that substantiates the fact. The entire item must remain a single string.
+
+7.  **Capture Intent, Motivation, and Context**: While maintaining fidelity, capture the "why" behind the "what" whenever it is explicitly stated. Include that nuance in the fact portion before the `|| Conversation:` suffix.
+
+Examples (demonstrating the required `|| Conversation:` suffix):
+
+Input (user is Alex):
+User: I was feeling a bit down last night, so I finally decided to start watching "The Expanse".
+Assistant: That sounds like a good comfort show.
+Output: {{"facts" : ["Alex started watching \"The Expanse\" last night because he was feeling a bit down. || Conversation: \"User: I was feeling a bit down last night, so I finally decided to start watching \\\"The Expanse\\\".\""]}}
+
+Input (user is Alex):
+User: In my epic fantasy kick, I've read The Name of the Wind, the entire Mistborn trilogy, and the first two books of The Stormlight Archive.
+Output: {{"facts" : ["During his epic fantasy kick, Alex has read \"The Name of the Wind\", the entire \"Mistborn\" trilogy, and the first two books of \"The Stormlight Archive\". || Conversation: \"User: In my epic fantasy kick, I've read The Name of the Wind, the entire Mistborn trilogy, and the first two books of The Stormlight Archive.\""]}}
+
+Input (user is Alex):
+User: To learn a new skill and hopefully meet people, I started taking cooking classes on September 2, 2022.
+Assistant: That's exciting!
+Output: {{"facts" : ["Alex started taking cooking classes on September 2, 2022, to learn a new skill and meet people. || Conversation: \"User: To learn a new skill and hopefully meet people, I started taking cooking classes on September 2, 2022.\""]}}
+
+Input (user is John):
+User: My friends and I organized two charity CS:GO tournaments.
+User: The first was on May 7, 2022, for a dog shelter. The second, for a children's hospital, was on October 30, 2022.
+Output: {{"facts" : ["John and his friends organized a charity CS:GO tournament on May 7, 2022, for a dog shelter. || Conversation: \"User: My friends and I organized two charity CS:GO tournaments.\" | \"User: The first was on May 7, 2022, for a dog shelter.\"","John and his friends organized a second charity CS:GO tournament on October 30, 2022, for a children's hospital. || Conversation: \"User: My friends and I organized two charity CS:GO tournaments.\" | \"User: The second, for a children's hospital, was on October 30, 2022.\""]}}
+
+Instructions & Constraints:
+
+- Today's date is {datetime.now().strftime("%Y-%m-%d")}.
+- Do not return facts from the few-shot examples provided above.
+- Detect the language of the user input and record the facts in that same language.
+- Every fact string **must** follow the format `<fact text> || Conversation: "<Speaker>: <utterance>" [ | "<Speaker>: <utterance>" ... ]`. Include every supporting utterance, in chronological order, separated by ` | ` inside the string.
+- The response must be a valid JSON object with a single key "facts" and a corresponding list of strings as the value.
+- Your output must be only the JSON object itself, without any surrounding text or markdown formatting like ```json.
+
+Following is a conversation between the user and the assistant. You have to extract the relevant facts and preferences about the user, if any, from the conversation and return them in the json format as shown above.
+"""
+
 # 贺斌最好的版本
 FACT_RETRIEVAL_PROMPT_5 = f"""You are an advanced information extraction agent. Your primary function is to meticulously analyze conversations and distill them into structured, context-rich facts about the user. These facts should be organized around entities (people, places, events, etc.) to ensure information is comprehensive and not fragmented.
 
@@ -599,6 +650,95 @@ Retrieved Facts: ["User's favorite color is now green"]
 {
     "memory": [
         { "id": "0", "text": "User's favorite color is blue", "event": "DELETE" }
+    ]
+}
+"""
+
+UPDATE_MEMORY_PROMPT_0c = """You are a meticulous Memory Curation Agent. Your task is to analyze new facts and integrate them with an existing memory store by determining the correct operation for each piece of information.
+
+The retrieved facts you receive have already been normalized into the format `<fact text> || Conversation: "<Speaker>: <utterance>" [ | "<Speaker>: <utterance>" ... ]`. This format preserves the verbatim conversation that supports each fact. Your job is to maintain that structure in every memory entry you output.
+
+You can perform four core operations: ADD, UPDATE, DELETE, and NONE.
+
+**Core Principles and Operations**
+
+1.  **ADD (New Information)**
+    * **When**: Use this when a new fact introduces completely new information that is unrelated to any existing memory.
+    * **Action**: Create a new memory item with a new, sequentially generated ID. Copy the retrieved fact string exactly—do not remove or alter the `|| Conversation:` suffix.
+
+2.  **UPDATE (Refine & Enhance)**
+    * **When**: Use this when a new fact is directly related to an existing memory item. This operation has two primary modes:
+        * **a. Enhancement**: The new fact adds more detail, context, or specificity to an existing memory.
+        * **b. Synthesis**: The new fact provides new, related information about the same topic, which can be merged with an existing memory to create a more comprehensive fact.
+    * **Action**: Modify the `text` of the existing memory item so that the fact portion reflects the best, most complete information. Preserve the `|| Conversation:` suffix and ensure it contains the full set of supporting utterances for the updated fact. When merging multiple conversation spans, concatenate them within the same suffix in chronological order using ` | ` as the separator. The `id` must remain the same.
+
+3.  **DELETE (Correction & Invalidation)**
+    * **When**: Use this when a new fact directly contradicts an existing memory or makes it obsolete.
+    * **Action**: Mark an existing memory item for deletion. The text of the memory should remain in the output for clarity, including its conversation suffix, but the event is marked as `DELETE`.
+
+4.  **NONE (No Change)**
+    * **When**: Use this when a new fact is a duplicate of an existing memory, or conveys the exact same information with trivial wording differences.
+    * **Action**: Make no changes to the existing memory item. The original memory text—including its `|| Conversation:` suffix—should stay untouched.
+
+**Output Format Instructions**
+Your final output must be a single JSON object with a key "memory" containing a list of memory items.
+Each item in the list should have:
+- `"id"`: (string) The identifier. For `ADD`, generate a new ID. For all other operations, use the existing ID from the old memory.
+- `"text"`: (string) The final text of the memory item, following the `<fact> || Conversation: ...` structure.
+- `"event"`: (string) One of "ADD", "UPDATE", "DELETE", "NONE".
+- `"old_memory"`: (string, **Optional**) Only include this key for the `UPDATE` event. Its value should be the original text of the memory before the update.
+
+**Examples of Application**
+
+**Input:**
+- Old Memory: `[{"id": "0", "text": "User is a software engineer || Conversation: \"User: I'm a software engineer.\""}]`
+- Retrieved Facts: `["User's name is John || Conversation: \"User: My name is John.\""]`
+
+**Output (ADD):**
+{
+    "memory": [
+        { "id": "0", "text": "User is a software engineer || Conversation: \"User: I'm a software engineer.\"", "event": "NONE" },
+        { "id": "1", "text": "User's name is John || Conversation: \"User: My name is John.\"", "event": "ADD" }
+    ]
+}
+
+**Input:**
+
+Old Memory: [{"id": "0", "text": "User likes to play cricket || Conversation: \"User: I like to play cricket.\""}]
+
+Retrieved Facts: ["User loves playing cricket with friends on weekends || Conversation: \"User: I love playing cricket with friends on weekends.\""]
+
+**Output (UPDATE - Enhancement):**
+{
+    "memory": [
+        { "id": "0", "text": "User loves playing cricket with friends on weekends || Conversation: \"User: I love playing cricket with friends on weekends.\"", "event": "UPDATE", "old_memory": "User likes to play cricket || Conversation: \"User: I like to play cricket.\"" }
+    ]
+}
+
+**Input:**
+
+Old Memory: [{"id": "0", "text": "User likes cheese pizza || Conversation: \"User: I like cheese pizza.\""}]
+
+Retrieved Facts: ["User also likes pepperoni pizza || Conversation: \"User: I also like pepperoni pizza.\""]
+
+**Output (UPDATE - Synthesis):**
+{
+    "memory": [
+        { "id": "0", "text": "User likes cheese and pepperoni pizza || Conversation: \"User: I like cheese pizza.\" | \"User: I also like pepperoni pizza.\"", "event": "UPDATE", "old_memory": "User likes cheese pizza || Conversation: \"User: I like cheese pizza.\"" }
+    ]
+}
+
+**Input:**
+
+Old Memory: [{"id": "0", "text": "User's favorite color is blue || Conversation: \"User: My favorite color is blue.\""}]
+
+Retrieved Facts: ["User's favorite color is now green || Conversation: \"User: My favorite color is now green.\""]
+
+**Output (DELETE & ADD):**
+{
+    "memory": [
+        { "id": "0", "text": "User's favorite color is blue || Conversation: \"User: My favorite color is blue.\"", "event": "DELETE" },
+        { "id": "1", "text": "User's favorite color is now green || Conversation: \"User: My favorite color is now green.\"", "event": "ADD" }
     ]
 }
 """
