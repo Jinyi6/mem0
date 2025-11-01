@@ -30,7 +30,7 @@ from mem0.exceptions import ValidationError as Mem0ValidationError
 from mem0.memory.base import MemoryBase
 from mem0.memory.setup import mem0_dir, setup_config
 from mem0.memory.storage import SQLiteManager
-from mem0.memory.telemetry import capture_event
+# from mem0.memory.telemetry import #capture_event
 from mem0.memory.utils import (
     get_fact_retrieval_messages,
     parse_messages,
@@ -197,7 +197,7 @@ class Memory(MemoryBase):
         self._telemetry_vector_store = VectorStoreFactory.create(
             self.config.vector_store.provider, telemetry_config
         )
-        capture_event("mem0.init", self, {"sync_type": "sync"})
+        #capture_event("mem0.init", self, {"sync_type": "sync"})
 
     @classmethod
     def from_config(
@@ -745,11 +745,11 @@ Status: {status}
             )
 
         keys, encoded_ids = process_telemetry_filters(filters)
-        capture_event(
-            "mem0.add",
-            self,
-            {"version": self.api_version, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "sync"},
-        )
+        #capture_event(
+        #     "mem0.add",
+        #     self,
+        #     {"version": self.api_version, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "sync"},
+        # )
         return returned_memories
 
     def _add_to_graph(self, messages, filters):
@@ -773,7 +773,7 @@ Status: {status}
         Returns:
             dict: Retrieved memory.
         """
-        capture_event("mem0.get", self, {"memory_id": memory_id, "sync_type": "sync"})
+        #capture_event("mem0.get", self, {"memory_id": memory_id, "sync_type": "sync"})
         memory = self.vector_store.get(vector_id=memory_id)
         if not memory:
             return None
@@ -842,9 +842,9 @@ Status: {status}
             raise ValueError("At least one of 'user_id', 'agent_id', or 'run_id' must be specified.")
 
         keys, encoded_ids = process_telemetry_filters(effective_filters)
-        capture_event(
-            "mem0.get_all", self, {"limit": limit, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "sync"}
-        )
+        #capture_event(
+        #     "mem0.get_all", self, {"limit": limit, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "sync"}
+        # )
 
         with self._executor("mem0-get") as executor:
             future_memories = executor.submit(self._get_all_from_vector_store, effective_filters, limit)
@@ -948,18 +948,18 @@ Status: {status}
             raise ValueError("At least one of 'user_id', 'agent_id', or 'run_id' must be specified.")
 
         keys, encoded_ids = process_telemetry_filters(effective_filters)
-        capture_event(
-            "mem0.search",
-            self,
-            {
-                "limit": limit,
-                "version": self.api_version,
-                "keys": keys,
-                "encoded_ids": encoded_ids,
-                "sync_type": "sync",
-                "threshold": threshold,
-            },
-        )
+        #capture_event(
+        #     "mem0.search",
+        #     self,
+        #     {
+        #         "limit": limit,
+        #         "version": self.api_version,
+        #         "keys": keys,
+        #         "encoded_ids": encoded_ids,
+        #         "sync_type": "sync",
+        #         "threshold": threshold,
+        #     },
+        # )
 
         aggregated_metrics: Dict[str, float] = {}
 
@@ -1128,7 +1128,7 @@ Status: {status}
             >>> m.update(memory_id="mem_123", data="Likes to play tennis on weekends")
             {'message': 'Memory updated successfully!'}
         """
-        capture_event("mem0.update", self, {"memory_id": memory_id, "sync_type": "sync"})
+        #capture_event("mem0.update", self, {"memory_id": memory_id, "sync_type": "sync"})
 
         existing_embeddings = {data: self.embedding_model.embed(data, "update")}
 
@@ -1142,7 +1142,7 @@ Status: {status}
         Args:
             memory_id (str): ID of the memory to delete.
         """
-        capture_event("mem0.delete", self, {"memory_id": memory_id, "sync_type": "sync"})
+        #capture_event("mem0.delete", self, {"memory_id": memory_id, "sync_type": "sync"})
         self._delete_memory(memory_id)
         return {"message": "Memory deleted successfully!"}
 
@@ -1169,7 +1169,7 @@ Status: {status}
             )
 
         keys, encoded_ids = process_telemetry_filters(filters)
-        capture_event("mem0.delete_all", self, {"keys": keys, "encoded_ids": encoded_ids, "sync_type": "sync"})
+        #capture_event("mem0.delete_all", self, {"keys": keys, "encoded_ids": encoded_ids, "sync_type": "sync"})
         # delete all vector memories and reset the collections
         memories = self.vector_store.list(filters=filters)[0]
         for memory in memories:
@@ -1193,7 +1193,7 @@ Status: {status}
         Returns:
             list: List of changes for the memory.
         """
-        capture_event("mem0.history", self, {"memory_id": memory_id, "sync_type": "sync"})
+        #capture_event("mem0.history", self, {"memory_id": memory_id, "sync_type": "sync"})
         return self.db.get_history(memory_id)
 
     def _create_memory(self, data, existing_embeddings, metadata=None):
@@ -1222,7 +1222,7 @@ Status: {status}
             actor_id=metadata.get("actor_id"),
             role=metadata.get("role"),
         )
-        capture_event("mem0._create_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
+        #capture_event("mem0._create_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
         return memory_id
 
     def _create_procedural_memory(self, messages, metadata=None, prompt=None):
@@ -1257,7 +1257,7 @@ Status: {status}
         metadata["memory_type"] = MemoryType.PROCEDURAL.value
         embeddings = self.embedding_model.embed(procedural_memory, memory_action="add")
         memory_id = self._create_memory(procedural_memory, {procedural_memory: embeddings}, metadata=metadata)
-        capture_event("mem0._create_procedural_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
+        #capture_event("mem0._create_procedural_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
 
         result = {"results": [{"id": memory_id, "memory": procedural_memory, "event": "ADD"}]}
 
@@ -1314,7 +1314,7 @@ Status: {status}
             actor_id=new_metadata.get("actor_id"),
             role=new_metadata.get("role"),
         )
-        capture_event("mem0._update_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
+        #capture_event("mem0._update_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
         return memory_id
 
     def _delete_memory(self, memory_id):
@@ -1331,7 +1331,7 @@ Status: {status}
             role=existing_memory.payload.get("role"),
             is_deleted=1,
         )
-        capture_event("mem0._delete_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
+        #capture_event("mem0._delete_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
         return memory_id
 
     def reset(self):
@@ -1357,7 +1357,7 @@ Status: {status}
             self.vector_store = VectorStoreFactory.create(
                 self.config.vector_store.provider, self.config.vector_store.config
             )
-        capture_event("mem0.reset", self, {"sync_type": "sync"})
+        #capture_event("mem0.reset", self, {"sync_type": "sync"})
 
     def chat(self, query):
         raise NotImplementedError("Chat function not implemented yet.")
@@ -1398,7 +1398,7 @@ class AsyncMemory(MemoryBase):
             self.config.vector_store.provider, self.config.vector_store.config
         )
         self.logger = logger if logger else logging.getLogger(self.__class__.__name__)
-        capture_event("mem0.init", self, {"sync_type": "async"})
+        #capture_event("mem0.init", self, {"sync_type": "async"})
 
     @classmethod
     async def from_config(cls, config_dict: Dict[str, Any], logger: Optional[logging.Logger] = None):
@@ -1696,11 +1696,11 @@ class AsyncMemory(MemoryBase):
             self.logger.error(f"Error in memory processing loop (async): {e}")
 
         keys, encoded_ids = process_telemetry_filters(effective_filters)
-        capture_event(
-            "mem0.add",
-            self,
-            {"version": self.api_version, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "async"},
-        )
+        #capture_event(
+        #     "mem0.add",
+        #     self,
+        #     {"version": self.api_version, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "async"},
+        # )
         return returned_memories
 
     async def _add_to_graph(self, messages, filters):
@@ -1724,7 +1724,7 @@ class AsyncMemory(MemoryBase):
         Returns:
             dict: Retrieved memory.
         """
-        capture_event("mem0.get", self, {"memory_id": memory_id, "sync_type": "async"})
+        #capture_event("mem0.get", self, {"memory_id": memory_id, "sync_type": "async"})
         memory = await asyncio.to_thread(self.vector_store.get, vector_id=memory_id)
         if not memory:
             return None
@@ -1796,9 +1796,9 @@ class AsyncMemory(MemoryBase):
             )
 
         keys, encoded_ids = process_telemetry_filters(effective_filters)
-        capture_event(
-            "mem0.get_all", self, {"limit": limit, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "async"}
-        )
+        #capture_event(
+        #     "mem0.get_all", self, {"limit": limit, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "async"}
+        # )
 
         vector_store_task = asyncio.create_task(self._get_all_from_vector_store(effective_filters, limit))
 
@@ -1905,18 +1905,18 @@ class AsyncMemory(MemoryBase):
             raise ValueError("at least one of 'user_id', 'agent_id', or 'run_id' must be specified ")
 
         keys, encoded_ids = process_telemetry_filters(effective_filters)
-        capture_event(
-            "mem0.search",
-            self,
-            {
-                "limit": limit,
-                "version": self.api_version,
-                "keys": keys,
-                "encoded_ids": encoded_ids,
-                "sync_type": "async",
-                "threshold": threshold,
-            },
-        )
+        #capture_event(
+        #     "mem0.search",
+        #     self,
+        #     {
+        #         "limit": limit,
+        #         "version": self.api_version,
+        #         "keys": keys,
+        #         "encoded_ids": encoded_ids,
+        #         "sync_type": "async",
+        #         "threshold": threshold,
+        #     },
+        # )
 
         vector_store_task = asyncio.create_task(self._search_vector_store(query, effective_filters, limit, threshold))
 
@@ -2003,7 +2003,7 @@ class AsyncMemory(MemoryBase):
             >>> await m.update(memory_id="mem_123", data="Likes to play tennis on weekends")
             {'message': 'Memory updated successfully!'}
         """
-        capture_event("mem0.update", self, {"memory_id": memory_id, "sync_type": "async"})
+        #capture_event("mem0.update", self, {"memory_id": memory_id, "sync_type": "async"})
 
         embeddings = await asyncio.to_thread(self.embedding_model.embed, data, "update")
         existing_embeddings = {data: embeddings}
@@ -2018,7 +2018,7 @@ class AsyncMemory(MemoryBase):
         Args:
             memory_id (str): ID of the memory to delete.
         """
-        capture_event("mem0.delete", self, {"memory_id": memory_id, "sync_type": "async"})
+        #capture_event("mem0.delete", self, {"memory_id": memory_id, "sync_type": "async"})
         await self._delete_memory(memory_id)
         return {"message": "Memory deleted successfully!"}
 
@@ -2045,7 +2045,7 @@ class AsyncMemory(MemoryBase):
             )
 
         keys, encoded_ids = process_telemetry_filters(filters)
-        capture_event("mem0.delete_all", self, {"keys": keys, "encoded_ids": encoded_ids, "sync_type": "async"})
+        #capture_event("mem0.delete_all", self, {"keys": keys, "encoded_ids": encoded_ids, "sync_type": "async"})
         memories = await asyncio.to_thread(self.vector_store.list, filters=filters)
 
         delete_tasks = []
@@ -2071,7 +2071,7 @@ class AsyncMemory(MemoryBase):
         Returns:
             list: List of changes for the memory.
         """
-        capture_event("mem0.history", self, {"memory_id": memory_id, "sync_type": "async"})
+        #capture_event("mem0.history", self, {"memory_id": memory_id, "sync_type": "async"})
         return await asyncio.to_thread(self.db.get_history, memory_id)
 
     async def _create_memory(self, data, existing_embeddings, metadata=None):
@@ -2105,7 +2105,7 @@ class AsyncMemory(MemoryBase):
             role=metadata.get("role"),
         )
 
-        capture_event("mem0._create_memory", self, {"memory_id": memory_id, "sync_type": "async"})
+        #capture_event("mem0._create_memory", self, {"memory_id": memory_id, "sync_type": "async"})
         return memory_id
 
     async def _create_procedural_memory(self, messages, metadata=None, llm=None, prompt=None):
@@ -2153,7 +2153,7 @@ class AsyncMemory(MemoryBase):
         metadata["memory_type"] = MemoryType.PROCEDURAL.value
         embeddings = await asyncio.to_thread(self.embedding_model.embed, procedural_memory, memory_action="add")
         memory_id = await self._create_memory(procedural_memory, {procedural_memory: embeddings}, metadata=metadata)
-        capture_event("mem0._create_procedural_memory", self, {"memory_id": memory_id, "sync_type": "async"})
+        #capture_event("mem0._create_procedural_memory", self, {"memory_id": memory_id, "sync_type": "async"})
 
         result = {"results": [{"id": memory_id, "memory": procedural_memory, "event": "ADD"}]}
 
@@ -2213,7 +2213,7 @@ class AsyncMemory(MemoryBase):
             actor_id=new_metadata.get("actor_id"),
             role=new_metadata.get("role"),
         )
-        capture_event("mem0._update_memory", self, {"memory_id": memory_id, "sync_type": "async"})
+        #capture_event("mem0._update_memory", self, {"memory_id": memory_id, "sync_type": "async"})
         return memory_id
 
     async def _delete_memory(self, memory_id):
@@ -2233,7 +2233,7 @@ class AsyncMemory(MemoryBase):
             is_deleted=1,
         )
 
-        capture_event("mem0._delete_memory", self, {"memory_id": memory_id, "sync_type": "async"})
+        #capture_event("mem0._delete_memory", self, {"memory_id": memory_id, "sync_type": "async"})
         return memory_id
 
     async def reset(self):
@@ -2260,7 +2260,7 @@ class AsyncMemory(MemoryBase):
         self.vector_store = VectorStoreFactory.create(
             self.config.vector_store.provider, self.config.vector_store.config
         )
-        capture_event("mem0.reset", self, {"sync_type": "async"})
+        #capture_event("mem0.reset", self, {"sync_type": "async"})
 
     async def chat(self, query):
         raise NotImplementedError("Chat function not implemented yet.")
