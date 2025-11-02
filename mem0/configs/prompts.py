@@ -443,7 +443,7 @@ UPDATE_MEMORY_PROMPT_12 = """
 You are a Memory Curation Agent. Integrate newly extracted facts into an existing memory store.
 
 INPUTS
-- old_memory: JSON list of items, each {"id": "<string>", "text": "<string>"}.
+- old_memory: JSON list of items, each {{"id": "<string>", "text": "<string>"}}.
 - new_facts: JSON list of strings exactly as produced by FACT_PROMPT.
 - goal: keep concise, durable, user-centric memories; remove noise.
 
@@ -482,7 +482,7 @@ UPDATE_MEMORY_PROMPT_13 = f"""
 You are a Memory Curation Agent. Integrate newly extracted facts into an existing memory store.
 
 INPUTS
-- old_memory: JSON list of items, each {"id": "<string>", "text": "<string>"}.
+- old_memory: JSON list of items, each {{"id": "<string>", "text": "<string>"}}.
 - new_facts: JSON list of strings exactly as produced by FACT_PROMPT.
 - goal: keep concise, durable, user-centric memories; remove noise.
 
