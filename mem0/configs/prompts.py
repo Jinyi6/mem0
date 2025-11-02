@@ -437,13 +437,280 @@ RULES
 }}
 
 """
+# 全面优化
+FACT_RETRIEVAL_PROMPT_14 = """
+[Role]
+You are a senior information extraction agent. Your task is to carefully analyze the conversation and distill it into a structured, context-rich list of “facts” about the user (and any explicitly mentioned people).
+
+[Output Requirements]
+- Return only one valid JSON object with key "facts" whose value is a list of strings, e.g., {"facts": ["...", "..."]}.
+- Write the facts in the same language as the input (if the conversation is in English, output English).
+- Extract facts only about the user or explicitly mentioned individuals based solely on the given conversation; do not invent or infer beyond the text. If the conversation contains speculation by the user, explicitly indicate in the fact that it is speculation.
+- If there are no extractable facts, return {"facts": []}.
+- Do not extract facts from the “Examples” in this prompt.
+
+[Extraction Principles]
+P1 Entity-Centered: Consolidate information around the same entity (person/event/project) into a single, coherent statement. Avoid splitting the same topic into multiple fragmented facts.
+
+P2 One Fact = One Complete Event/Idea: A complete thought (one subject’s identity or a single event with context) should be one fact. Parallel and independent matters (e.g., two activities on different dates, two distinct plans) should be split into separate facts.
+
+P3 Information Completeness: Each fact should cover as many of Who / What / When / Where / Why / Attributes as feasible without sacrificing clarity.
+
+P4 Precision: Capture qualifiers and details (places, exact times, objects, conditions, constraints) to make facts useful and unambiguous. When names are known (e.g., “Alex,” “Emily”), subsequent facts must use the name instead of “the user/he/she.” If unknown, use clear references (e.g., “the user,” “Alex’s manager”).
+
+P5 Appropriate Completion: You may modestly complete pronouns and adverbials (must and only based on context) so the sentence is self-contained and understandable. If the user explicitly states reasons (motivation/purpose/feelings), include them in the same fact to make a semantic loop. Redundancy is allowed: a single utterance can yield multiple facts at different levels of detail.
+
+P6 Faithful, No Guesswork: Use original wording whenever possible; do not speculate. Numbers, dates, and proper nouns must be exact.
+
+P7 List/Enumeration Completeness: When lists occur (books, locations, preferences), the record must include all items—no truncation or omissions.
+
+P8 Time Rules
+— Keep the original relative time expression. If an exact date can be computed from the message timestamp, append a normalized date in parentheses. For example, if said in June 2022, “last month” should be annotated as “occurred in the month prior to June 2022, i.e., May 2022.”
+— If the time cannot be precisely computed (e.g., “next Friday,” “end of the month,” “the last Friday of the trip”), append a note like “(time relative to a specific day: original wording).”
+
+P9 Image-Related Facts: When a message includes an image and/or caption, append the following at the end using key–value style with semicolons: ; image: <URL>; title: <text>.
+
+P10 Boundaries: Ignore pleasantries. Maintain speaker attributions and preserve speculation. For non-user statements, prepend “X claims/said.” For third-party speculation, mark “speculation.” Use bracketed notes for disambiguation when needed.
+
+[Format Conventions]
+- Each list element should be a complete, self-contained statement that can stand alone; add parenthetical clarifications when necessary. If needed, append image/caption notes at the end in the format: ; image: <URL>; title: <text>.
+
+— Examples —
+
+Example 1 | Small Talk & Irrelevant Content → Empty Result
+
+Input
+User: Hello! How are you?
+Assistant: I’m good—how can I help?
+
+Output
+{"facts": []}
+
+Applied Principles: P10 (ignore pleasantries), P6 (faithful/no invention)
+
+Example 2 | Identity Information Merged into a Single Entry (Entity-Centered + Complete Info)
+
+Input
+User: My name is Lin, and I work as a product manager in Shanghai.
+Assistant: Nice to meet you!
+
+Output
+{"facts": ["The user’s name is Lin, and they are a product manager working in Shanghai."]}
+
+Applied Principles: P1 (merge around the same entity), P2 (one complete idea), P3 (Who/What/Where), P4 (use the name “Lin”), P6 (faithful)
+
+Example 3 | One Complete Event (including Why) + Normalized Relative Time
+
+Input (conversation date: June 2, 2023)
+User A: Yesterday at 10 a.m., I reviewed the product roadmap with Chen Wei in the second-floor meeting room.
+User B: Because the roadmap will be released externally next week.
+
+Output
+{"facts": ["The user reviewed the product roadmap with Chen Wei at 10:00 a.m. yesterday in the second-floor meeting room, because the roadmap will be released externally next week (occurred yesterday relative to June 2, 2023, i.e., June 1, 2023)."]}
+
+Applied Principles: P1, P2 (merge into one event), P3 (Who/What/When/Where/Why), P4 (name “Chen Wei”), P6 (faithful), P8 (normalized relative time)
+
+Example 4 | One Sentence Contains Two Independent Matters → Split into Two (Travel & Lodging), With Modest Completion to Ensure Clarity; Redundancy Allowed.
+
+Input (conversation date: June 2, 2023)
+User: Next week I’m going to Beijing on a business trip, and I’ll stay three nights at the Renaissance Beijing Guomao Hotel.
+Assistant: Have a smooth trip.
+
+Output
+{
+  "facts": [
+    "The user plans to go to Beijing on a business trip next week (relative to June 2, 2023: keep ‘next week’).",
+    "During that business trip next week, the user plans to stay three nights at the Renaissance Beijing Guomao Hotel."
+  ]
+}
+
+Applied Principles: P2 (split independent matters), P3 (complete information), P6 (faithful), P8 (retain relative time)
+
+Example 5 | Preferences and Dislikes (Complete Enumeration, Separate Statements, Modest Completion)
+
+Input
+User: My most-used programming languages are Python, Go, and Rust; I don’t really like JavaScript.
+Assistant: Understood.
+
+Output
+{
+  "facts": [
+    "The user’s most-used programming languages are Python, Go, and Rust.",
+    "A programming language the user does not like is JavaScript."
+  ]
+}
+
+Applied Principles: P7 (complete enumeration), P2 (separate stances), P3 (complete expression), P6 (faithful)
+
+Example 6 | Speculative Statements Must Be Marked as “Speculation”
+
+Input
+User: I suspect the current network issue might be caused by the office router.
+Assistant: Try restarting it first.
+
+Output
+{"facts": ["The user speculates that the current network problem is caused by the office router."]}
+
+Applied Principles: P6 (faithful: preserve ‘speculation’), P10 (do not treat suggestions as facts)
+
+Example 7 | Image Facts (Attach URL and Title)
+
+Input
+User: This is my ideal home office.
+(Image URL: https://example.com/home-office.jpg; Title: Floor-to-ceiling ocean view, single standing desk)
+
+Output
+{"facts": ["The user shows their ideal home office; image: https://example.com/home-office.jpg; title: Floor-to-ceiling ocean view, single standing desk."]}
+
+Applied Principles: P9 (image-related facts), P6 (faithful)
+
+Example 8 | Relative Time Normalized to “Month” + Complete Book List
+
+Input (conversation date: June 2, 2023)
+User: Last month I finished reading ‘SICP’ and ‘Introduction to Algorithms.’
+
+Output
+{"facts": ["The user finished ‘SICP’ and ‘Introduction to Algorithms’ in May 2023 (originally stated as last month relative to June 2023, i.e., May 2023)."]}
+
+Applied Principles: P7 (complete enumeration), P8 (relative time → normalized month), P6 (faithful)
+
+Example 9 | The Same Fact Expressed Across Turns → Deduplicate and Merge into One
+
+Input
+User: I’m left-handed.
+Assistant: Oh—
+User: I normally write with my left hand.
+
+Output
+{"facts": ["The user is left-handed (normally writes with the left hand)."]}
+
+Applied Principles: P1 (merge for the same entity), P10 (deduplicate), P5 (modest completion for a self-contained sentence), P6 (faithful)
+
+Example 10 | Two Activities on Different Dates → One Fact Each
+
+Input
+User: Our team did the first canary release on 2025-03-12 and the second on 2025-04-25; risk validation before full rollout went smoothly.
+Assistant: Congrats!
+
+Output
+{
+  "facts": [
+    "The user’s team performed the first canary release on 2025-03-12, and risk validation went smoothly.",
+    "The user’s team performed the second canary release on 2025-04-25, and risk validation went smoothly."
+  ]
+}
+
+Applied Principles: P2 (separate by date), P3 (include outcome/why when present)
+
+Note that the current conversation happens at time
+"""
+
+UPDATE_MEMORY_PROMPT_14 = f"""
+You are a senior “Memory Curation Agent,” akin to a digital librarian for a knowledge base. Your task is to intelligently integrate new, high-fidelity facts into the existing memory base so it becomes more comprehensive, accurate, and up to date.
+
+You can perform four core operations: ADD (create), UPDATE (revise/enhance), DELETE (remove), and NONE (no change).
+
+Guiding Principles
+
+1) Goal: enable knowledge to evolve—not merely be stored.
+   The primary objective is to grow the memory base into a coherent and comprehensive knowledge base. UPDATEs should make a memory more complete or more accurate.
+
+2) DELETE Principle:
+   Use DELETE to explicitly mark a memory item as incorrect or obsolete. The new, correct information MUST be recorded as a separate ADD so the change history remains clear and traceable. Do NOT delete historically true events just because status has changed (e.g., “They worked at Acme for 5 years”). DELETE should be used only for statements that incorrectly describe the current state. Status changes should be handled via ADD or UPDATE. Use DELETE with care; avoid it unless necessary.
+
+3) Moderate Redundancy:
+   • The primary goal is to maintain, via UPDATE, a “Canonical Memory” for each topic—the most complete version.
+   • However, if a new, atomic fact contains unique, high-fidelity phrasing (e.g., a vivid direct quote) that would lose nuance if only summarized, then do BOTH: UPDATE the canonical memory AND ADD the atomic, high-fidelity fact. This “appropriate redundancy” balances synthesis with preservation of fine-grained detail.
+
+Core Operations & Rules
+
+1) ADD (Create a new memory)
+   • When to use: The new fact introduces entirely new information that does not relate to any existing memory.
+   • Action: Create a new memory item with a new sequential ID. Copy the “fact” string verbatim.
+
+2) UPDATE (Refine & Enhance an existing memory)
+   • When to use: The new fact directly relates to an existing memory—either:
+     a. Enrichment: the new fact adds detail, context, or specificity, or
+     b. Synthesis: the new fact adds related information on the same topic that can be merged to form a more comprehensive memory.
+   • Action: Edit that memory item’s `text` so that the factual content reflects the most complete information.
+
+3) NONE (No change)
+   • When to use: The new fact duplicates an existing memory or is merely a stylistic rewording that introduces no new information. Use NONE sparingly; avoid it unless appropriate.
+   • Action: Do nothing to that memory.
+
+Output Format
+Your final output MUST be a single JSON object whose key "memory" maps to a list of memory items.
+Each list element must include:
+- "id": (string) the identifier. For ADD, generate a new ID; for other operations, reuse the existing memory’s ID.
+- "text": (string) the final text of the memory. For DELETE, this should be the original text being deleted.
+- "event": (string) one of "ADD", "UPDATE", "DELETE", or "NONE".
+- "old_memory": (string, optional) included ONLY for UPDATE; its value is the original text before updating.
+
+OUTPUT (return valid JSON only; begin with “{{” and end with “}}”)
+{{
+  "memory": [
+    {{ "id": "<existing-or-new>", "text": "<final text>", "event": "ADD|UPDATE|DELETE|NONE", "old_memory": "<only for UPDATE>" }},
+    ...
+  ]
+}}
+
+[Example 1 — ADD when storage is empty]
+- old_memory: []
+- new_facts: ["Jon: I lost my job yesterday; normalized_time:2023-03-16"]
+- output:
+{{
+  "memory": [
+    {{"id": "0", "text": "Jon lost his job on 2023-03-16", "event": "ADD" }}
+  ]
+}}
+
+[Example 2 — UPDATE (Enrichment)]
+- old_memory: [{{"id":"1","text":"Gina left DoorDash in 2023-01"}}]
+- new_facts: ["Gina: I left DoorDash this month; normalized_time: 2023-01", "Gina: I started an online clothing store after leaving DoorDash"]
+- output:
+{{
+  "memory": [
+    {{ "id": "1", "text": "Gina left DoorDash in 2023-01 and then launched an online clothing store", "event": "UPDATE", "old_memory": "Gina left DoorDash in 2023-01" }}
+  ]
+}}
+
+[Example 3 — UPDATE (Synthesis)]
+- old_memory: [{{"id":"2","text":"Jon prefers natural light for the studio"}}]
+- new_facts: ["Jon: I want Marley flooring", "Jon: I want my studio by the water"]
+- output:
+{{
+  "memory": [
+    {{ "id": "2", "text": "Jon wants a waterfront studio with natural light and Marley flooring", "event": "UPDATE", "old_memory": "Jon prefers natural light for the studio" }}
+  ]
+}}
+
+[Example 4 — UPDATE (Contradiction / Change)]
+- old_memory: [{{"id":"3","text":"Jon’s favorite color is blue"}}]
+- new_facts: ["Jon: My favorite color is now green"]
+- output:
+{{
+  "memory": [
+    {{ "id": "3", "text": "Jon’s favorite color is green. Previously, he said his favorite color was blue.", "event": "UPDATE" }}
+  ]
+}}
+
+[Example 5 — NONE (Duplicate/Trivial)]
+- old_memory: [{{"id":"4","text":"Gina runs an online clothing store"}}]
+- new_facts: ["Gina: I run an online clothing store"]
+- output:
+{{
+  "memory": [
+    {{ "id": "4", "text": "Gina runs an online clothing store", "event": "NONE" }}
+  ]
+}}
+"""
 
 # gpt给的
 UPDATE_MEMORY_PROMPT_12 = """
 You are a Memory Curation Agent. Integrate newly extracted facts into an existing memory store.
 
 INPUTS
-- old_memory: JSON list of items, each {{"id": "<string>", "text": "<string>"}}.
+- old_memory: JSON list of items, each {"id": "<string>", "text": "<string>"}.
 - new_facts: JSON list of strings exactly as produced by FACT_PROMPT.
 - goal: keep concise, durable, user-centric memories; remove noise.
 
