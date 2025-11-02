@@ -602,8 +602,7 @@ Output
 
 Applied Principles: P2 (separate by date), P3 (include outcome/why when present)
 
-Note that the current conversation happens at time
-"""
+Note that the following conversation happens at"""
 
 UPDATE_MEMORY_PROMPT_14 = f"""
 You are a senior “Memory Curation Agent,” akin to a digital librarian for a knowledge base. Your task is to intelligently integrate new, high-fidelity facts into the existing memory base so it becomes more comprehensive, accurate, and up to date.

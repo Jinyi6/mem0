@@ -441,7 +441,7 @@ Status: {status}
 
         if self.config.custom_fact_extraction_prompt:
             system_prompt = self.config.custom_fact_extraction_prompt
-            if system_prompt.endswith("Note that the current conversation happens at time"):
+            if system_prompt.endswith("Note that the following conversation happens at"):
                 system_prompt += f" {metadata['timestamp'] if 'timestamp' in metadata else ''}."
             user_prompt = f"Input:\n{parsed_messages}"
         else:
