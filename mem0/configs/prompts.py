@@ -218,21 +218,21 @@ Examples (demonstrating the required `|| Conversation:` suffix):
 Input (user is Alex):
 User: I was feeling a bit down last night, so I finally decided to start watching "The Expanse".
 Assistant: That sounds like a good comfort show.
-Output: {{"facts" : ["Alex started watching \"The Expanse\" last night because he was feeling a bit down. || Conversation: \"User: I was feeling a bit down last night, so I finally decided to start watching \\\"The Expanse\\\".\""]}}
+Output: {{"facts" : ["Alex started watching The Expanse last night because he was feeling a bit down. || Conversation: User: I was feeling a bit down last night, so I finally decided to start watching \\The Expanse\\."]}}
 
 Input (user is Alex):
 User: In my epic fantasy kick, I've read The Name of the Wind, the entire Mistborn trilogy, and the first two books of The Stormlight Archive.
-Output: {{"facts" : ["During his epic fantasy kick, Alex has read \"The Name of the Wind\", the entire \"Mistborn\" trilogy, and the first two books of \"The Stormlight Archive\". || Conversation: \"User: In my epic fantasy kick, I've read The Name of the Wind, the entire Mistborn trilogy, and the first two books of The Stormlight Archive.\""]}}
+Output: {{"facts" : ["During his epic fantasy kick, Alex has read The Name of the Wind, the entire Mistborn trilogy, and the first two books of The Stormlight Archive. || Conversation: User: In my epic fantasy kick, I've read The Name of the Wind, the entire Mistborn trilogy, and the first two books of The Stormlight Archive."]}}
 
 Input (user is Alex):
 User: To learn a new skill and hopefully meet people, I started taking cooking classes on September 2, 2022.
 Assistant: That's exciting!
-Output: {{"facts" : ["Alex started taking cooking classes on September 2, 2022, to learn a new skill and meet people. || Conversation: \"User: To learn a new skill and hopefully meet people, I started taking cooking classes on September 2, 2022.\""]}}
+Output: {{"facts" : ["Alex started taking cooking classes on September 2, 2022, to learn a new skill and meet people. || Conversation: User: To learn a new skill and hopefully meet people, I started taking cooking classes on September 2, 2022."]}}
 
 Input (user is John):
 User: My friends and I organized two charity CS:GO tournaments.
 User: The first was on May 7, 2022, for a dog shelter. The second, for a children's hospital, was on October 30, 2022.
-Output: {{"facts" : ["John and his friends organized a charity CS:GO tournament on May 7, 2022, for a dog shelter. || Conversation: \"User: My friends and I organized two charity CS:GO tournaments.\" | \"User: The first was on May 7, 2022, for a dog shelter.\"","John and his friends organized a second charity CS:GO tournament on October 30, 2022, for a children's hospital. || Conversation: \"User: My friends and I organized two charity CS:GO tournaments.\" | \"User: The second, for a children's hospital, was on October 30, 2022.\""]}}
+Output: {{"facts" : ["John and his friends organized a charity CS:GO tournament on May 7, 2022, for a dog shelter. || Conversation: User: My friends and I organized two charity CS:GO tournaments. | User: The first was on May 7, 2022, for a dog shelter.","John and his friends organized a second charity CS:GO tournament on October 30, 2022, for a children's hospital. || Conversation: User: My friends and I organized two charity CS:GO tournaments. | User: The second, for a children's hospital, was on October 30, 2022."]}}
 
 Instructions & Constraints:
 
@@ -959,54 +959,54 @@ Each item in the list should have:
 **Examples of Application**
 
 **Input:**
-- Old Memory: `[{"id": "0", "text": "User is a software engineer || Conversation: \"User: I'm a software engineer.\""}]`
-- Retrieved Facts: `["User's name is John || Conversation: \"User: My name is John.\""]`
+- Old Memory: `[{"id": "0", "text": "User is a software engineer || Conversation: User: I'm a software engineer."}]`
+- Retrieved Facts: `["User's name is John || Conversation: User: My name is John."]`
 
 **Output (ADD):**
 {
     "memory": [
-        { "id": "0", "text": "User is a software engineer || Conversation: \"User: I'm a software engineer.\"", "event": "NONE" },
-        { "id": "1", "text": "User's name is John || Conversation: \"User: My name is John.\"", "event": "ADD" }
+        { "id": "0", "text": "User is a software engineer || Conversation: User: I'm a software engineer.", "event": "NONE" },
+        { "id": "1", "text": "User's name is John || Conversation: User: My name is John.", "event": "ADD" }
     ]
 }
 
 **Input:**
 
-Old Memory: [{"id": "0", "text": "User likes to play cricket || Conversation: \"User: I like to play cricket.\""}]
+Old Memory: [{"id": "0", "text": "User likes to play cricket || Conversation: User: I like to play cricket."}]
 
-Retrieved Facts: ["User loves playing cricket with friends on weekends || Conversation: \"User: I love playing cricket with friends on weekends.\""]
+Retrieved Facts: ["User loves playing cricket with friends on weekends || Conversation: User: I love playing cricket with friends on weekends."]
 
 **Output (UPDATE - Enhancement):**
 {
     "memory": [
-        { "id": "0", "text": "User loves playing cricket with friends on weekends || Conversation: \"User: I love playing cricket with friends on weekends.\"", "event": "UPDATE", "old_memory": "User likes to play cricket || Conversation: \"User: I like to play cricket.\"" }
+        { "id": "0", "text": "User loves playing cricket with friends on weekends || Conversation: User: I love playing cricket with friends on weekends.", "event": "UPDATE", "old_memory": "User likes to play cricket || Conversation: User: I like to play cricket." }
     ]
 }
 
 **Input:**
 
-Old Memory: [{"id": "0", "text": "User likes cheese pizza || Conversation: \"User: I like cheese pizza.\""}]
+Old Memory: [{"id": "0", "text": "User likes cheese pizza || Conversation: User: I like cheese pizza."}]
 
-Retrieved Facts: ["User also likes pepperoni pizza || Conversation: \"User: I also like pepperoni pizza.\""]
+Retrieved Facts: ["User also likes pepperoni pizza || Conversation: User: I also like pepperoni pizza."]
 
 **Output (UPDATE - Synthesis):**
 {
     "memory": [
-        { "id": "0", "text": "User likes cheese and pepperoni pizza || Conversation: \"User: I like cheese pizza.\" | \"User: I also like pepperoni pizza.\"", "event": "UPDATE", "old_memory": "User likes cheese pizza || Conversation: \"User: I like cheese pizza.\"" }
+        { "id": "0", "text": "User likes cheese and pepperoni pizza || Conversation: User: I like cheese pizza. | User: I also like pepperoni pizza.", "event": "UPDATE", "old_memory": "User likes cheese pizza || Conversation: User: I like cheese pizza." }
     ]
 }
 
 **Input:**
 
-Old Memory: [{"id": "0", "text": "User's favorite color is blue || Conversation: \"User: My favorite color is blue.\""}]
+Old Memory: [{"id": "0", "text": "User's favorite color is blue || Conversation: User: My favorite color is blue."}]
 
-Retrieved Facts: ["User's favorite color is now green || Conversation: \"User: My favorite color is now green.\""]
+Retrieved Facts: ["User's favorite color is now green || Conversation: User: My favorite color is now green."]
 
 **Output (DELETE & ADD):**
 {
     "memory": [
-        { "id": "0", "text": "User's favorite color is blue || Conversation: \"User: My favorite color is blue.\"", "event": "DELETE" },
-        { "id": "1", "text": "User's favorite color is now green || Conversation: \"User: My favorite color is now green.\"", "event": "ADD" }
+        { "id": "0", "text": "User's favorite color is blue || Conversation: User: My favorite color is blue.", "event": "DELETE" },
+        { "id": "1", "text": "User's favorite color is now green || Conversation: User: My favorite color is now green.", "event": "ADD" }
     ]
 }
 """
