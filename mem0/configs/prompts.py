@@ -506,7 +506,7 @@ User A: Yesterday at 10 a.m., I reviewed the product roadmap with Chen Wei in th
 User B: Because the roadmap will be released externally next week.
 
 Output
-{"facts": ["The user reviewed the product roadmap with Chen Wei at 10:00 a.m. yesterday in the second-floor meeting room, because the roadmap will be released externally next week (occurred yesterday relative to June 2, 2023, i.e., June 1, 2023)."]}
+{"facts": ["The user reviewed the product roadmap with Chen Wei at 10:00 a.m. yesterday in the second-floor meeting room, because the roadmap will be released externally next week (originally stated as yesterday relative to June 2, 2023, i.e., June 1, 2023)."]}
 
 Applied Principles: P1, P2 (merge into one event), P3 (Who/What/When/Where/Why), P4 (name “Chen Wei”), P6 (faithful), P8 (normalized relative time)
 
@@ -519,7 +519,7 @@ Assistant: Have a smooth trip.
 Output
 {
   "facts": [
-    "The user plans to go to Beijing on a business trip next week (relative to June 2, 2023: keep ‘next week’).",
+    "The user plans to go to Beijing on a business trip next week (originally stated as next week relative to June 2, 2023: keep ‘next week’).",
     "During that business trip next week, the user plans to stay three nights at the Renaissance Beijing Guomao Hotel."
   ]
 }
