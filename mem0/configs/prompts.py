@@ -392,6 +392,123 @@ RULES
 - Do not infer or compress wording; stay faithful to the source phrasing.
 - No comments, no trailing commas, no extra keys.
 
+
+[Example A — Relative time -> absolute day]
+- Source turn ts: 2023-03-16
+- Transcript:
+  user (Jon): I lost my job yesterday.
+- Output:
+{{
+  "facts": [
+    "Jon: I lost my job yesterday; normalized_time:2023-03-16"
+  ]
+}}
+
+[Example B — Relative month; preserve wording + normalization]
+- Source turn ts: 2023-01-20
+- Transcript:
+  user (Gina): I left DoorDash this month.
+- Output:
+{{
+  "facts": [
+    "Gina: I left DoorDash this month; normalized_time:2023-01"
+  ]
+}}
+
+[Example C — Image fact and caption]
+- Source turn ts: 2023-02-05
+- Transcript:
+  user (Jon): This is my ideal studio by the water. [Image: https://example.com/room.jpg] with caption: a room with an ocean view and yoga mats
+- Output:
+{{
+  "facts": [
+    "Jon: This is my ideal studio by the water; image:https://example.com/room.jpg; caption: a room with an ocean view and yoga mats"
+  ]
+}}
+
+[Example D — Complete lists (no omissions)]
+- Transcript:
+  user (Gina): My store carries dresses, jackets, and shoes.
+- Output:
+{{
+  "facts": [
+    "Gina: My store carries dresses, jackets, and shoes"
+  ]
+}}
+
+"""
+
+# gpt给的
+UPDATE_MEMORY_PROMPT_12 = """
+You are a Memory Curation Agent. Integrate newly extracted facts into an existing memory store.
+
+INPUTS
+- old_memory: JSON list of items, each {"id": "<string>", "text": "<string>"}.
+- new_facts: JSON list of strings exactly as produced by FACT_PROMPT.
+- goal: keep concise, durable, user-centric memories; remove noise.
+
+OPERATIONS
+- ADD: fact is new, salient, and not already captured.
+- UPDATE: new fact refines or extends an existing item about the same subject.
+  * Enhancement: add missing detail (dates, quantities, reasons).
+  * Synthesis: merge closely related preferences/items into one clearer sentence.
+- DELETE: new fact contradicts an existing item (the old item becomes obsolete).
+- NONE: duplicate or trivial chit-chat (encouragement, “thanks”, greetings).
+
+SELECTION GUIDELINES
+- Prefer stable identity/preferences, dated events, decisions, goals, and constraints.
+- Keep normalized times if present; prefer absolute dates over relatives.
+- Exclude generic praise/motivation unless it encodes a durable relationship or commitment.
+- Avoid storing perishable scheduling minutiae unless the question set requires it.
+
+OUTPUT (valid JSON ONLY; begin with “{” and end with “}”)
+{
+  "memory": [
+    { "id": "<existing-or-new>", "text": "<final text>", "event": "ADD|UPDATE|DELETE|NONE", "old_memory": "<only for UPDATE>" },
+    ...
+  ]
+}
+
+RULES
+- For UPDATE, preserve the original id and include old_memory exactly.
+- For ADD, generate a new sequential id (string).
+- No leading commas or prose; no trailing commas; no comments.
+- If old_memory is empty, only ADD events should appear.
+- Keep one sentence per memory item; concise but complete.
+- Do not invent specifics that were not in new_facts or old_memory.
+"""
+
+UPDATE_MEMORY_PROMPT_13 = f"""
+You are a Memory Curation Agent. Integrate newly extracted facts into an existing memory store.
+
+INPUTS
+- old_memory: JSON list of items, each {"id": "<string>", "text": "<string>"}.
+- new_facts: JSON list of strings exactly as produced by FACT_PROMPT.
+- goal: keep concise, durable, user-centric memories; remove noise.
+
+OPERATIONS
+- ADD: fact is new, salient, and not already captured.
+- UPDATE: new fact refines or extends an existing item about the same subject.
+  * Enhancement: add missing detail (dates, quantities, reasons).
+  * Synthesis: merge closely related preferences/items into one clearer sentence.
+- DELETE: new fact contradicts an existing item (the old item becomes obsolete).
+- NONE: duplicate or trivial chit-chat (encouragement, “thanks”, greetings).
+
+SELECTION GUIDELINES
+- Prefer stable identity/preferences, dated events, decisions, goals, and constraints.
+- Keep normalized times if present; prefer absolute dates over relatives.
+- Exclude generic praise/motivation unless it encodes a durable relationship or commitment.
+- Avoid storing perishable scheduling minutiae unless the question set requires it.
+
+OUTPUT (valid JSON ONLY; begin with “{{” and end with “}}”)
+{{
+  "memory": [
+    {{ "id": "<existing-or-new>", "text": "<final text>", "event": "ADD|UPDATE|DELETE|NONE", "old_memory": "<only for UPDATE>" }},
+    ...
+  ]
+}}
+
+
 [Example 1 — ADD when store is empty]
 - old_memory: []
 - new_facts: ["Jon: I lost my job yesterday; normalized_time:2023-03-16"]
@@ -441,121 +558,6 @@ RULES
     {{ "id": "4", "text": "Gina runs an online clothing store", "event": "NONE" }}
   ]
 }}
-"""
-
-# gpt给的
-UPDATE_MEMORY_PROMPT_12 = """
-You are a Memory Curation Agent. Integrate newly extracted facts into an existing memory store.
-
-INPUTS
-- old_memory: JSON list of items, each {"id": "<string>", "text": "<string>"}.
-- new_facts: JSON list of strings exactly as produced by FACT_PROMPT.
-- goal: keep concise, durable, user-centric memories; remove noise.
-
-OPERATIONS
-- ADD: fact is new, salient, and not already captured.
-- UPDATE: new fact refines or extends an existing item about the same subject.
-  * Enhancement: add missing detail (dates, quantities, reasons).
-  * Synthesis: merge closely related preferences/items into one clearer sentence.
-- DELETE: new fact contradicts an existing item (the old item becomes obsolete).
-- NONE: duplicate or trivial chit-chat (encouragement, “thanks”, greetings).
-
-SELECTION GUIDELINES
-- Prefer stable identity/preferences, dated events, decisions, goals, and constraints.
-- Keep normalized times if present; prefer absolute dates over relatives.
-- Exclude generic praise/motivation unless it encodes a durable relationship or commitment.
-- Avoid storing perishable scheduling minutiae unless the question set requires it.
-
-OUTPUT (valid JSON ONLY; begin with “{” and end with “}”)
-{
-  "memory": [
-    { "id": "<existing-or-new>", "text": "<final text>", "event": "ADD|UPDATE|DELETE|NONE", "old_memory": "<only for UPDATE>" },
-    ...
-  ]
-}
-
-RULES
-- For UPDATE, preserve the original id and include old_memory exactly.
-- For ADD, generate a new sequential id (string).
-- No leading commas or prose; no trailing commas; no comments.
-- If old_memory is empty, only ADD events should appear.
-- Keep one sentence per memory item; concise but complete.
-- Do not invent specifics that were not in new_facts or old_memory.
-"""
-
-UPDATE_MEMORY_PROMPT_13 = """
-You are a Memory Curation Agent. Integrate newly extracted facts into an existing memory store.
-
-INPUTS
-- old_memory: JSON list of items, each {"id": "<string>", "text": "<string>"}.
-- new_facts: JSON list of strings exactly as produced by FACT_PROMPT.
-- goal: keep concise, durable, user-centric memories; remove noise.
-
-OPERATIONS
-- ADD: fact is new, salient, and not already captured.
-- UPDATE: new fact refines or extends an existing item about the same subject.
-  * Enhancement: add missing detail (dates, quantities, reasons).
-  * Synthesis: merge closely related preferences/items into one clearer sentence.
-- DELETE: new fact contradicts an existing item (the old item becomes obsolete).
-- NONE: duplicate or trivial chit-chat (encouragement, “thanks”, greetings).
-
-SELECTION GUIDELINES
-- Prefer stable identity/preferences, dated events, decisions, goals, and constraints.
-- Keep normalized times if present; prefer absolute dates over relatives.
-- Exclude generic praise/motivation unless it encodes a durable relationship or commitment.
-- Avoid storing perishable scheduling minutiae unless the question set requires it.
-
-OUTPUT (valid JSON ONLY; begin with “{” and end with “}”)
-{
-  "memory": [
-    { "id": "<existing-or-new>", "text": "<final text>", "event": "ADD|UPDATE|DELETE|NONE", "old_memory": "<only for UPDATE>" },
-    ...
-  ]
-}
-
-
-[Example A — Relative time -> absolute day]
-- Source turn ts: 2023-03-16
-- Transcript:
-  user (Jon): I lost my job yesterday.
-- Output:
-{
-  "facts": [
-    "Jon: I lost my job yesterday; normalized_time:2023-03-16"
-  ]
-}
-
-[Example B — Relative month; preserve wording + normalization]
-- Source turn ts: 2023-01-20
-- Transcript:
-  user (Gina): I left DoorDash this month.
-- Output:
-{
-  "facts": [
-    "Gina: I left DoorDash this month; normalized_time:2023-01"
-  ]
-}
-
-[Example C — Image fact and caption]
-- Source turn ts: 2023-02-05
-- Transcript:
-  user (Jon): This is my ideal studio by the water. [Image: https://example.com/room.jpg] with caption: a room with an ocean view and yoga mats
-- Output:
-{
-  "facts": [
-    "Jon: This is my ideal studio by the water; image:https://example.com/room.jpg; caption: a room with an ocean view and yoga mats"
-  ]
-}
-
-[Example D — Complete lists (no omissions)]
-- Transcript:
-  user (Gina): My store carries dresses, jackets, and shoes.
-- Output:
-{
-  "facts": [
-    "Gina: My store carries dresses, jackets, and shoes"
-  ]
-}
 
 RULES
 - For UPDATE, preserve the original id and include old_memory exactly.
