@@ -1103,3 +1103,46 @@ Question: {{question}}
 
 Answer:
 """
+
+ANSWER_PROMPT_14_6 = """
+You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories, and answer the question.
+
+# CONTEXT:
+You have access to memories from two speakers in the conversation. These memories carry timestamps and may be relevant to answering the question.
+
+# INSTRUCTIONS:
+1. Carefully analyze all memories provided by both speakers.
+2. Pay special attention to timestamps to determine the answer.
+3. If the question asks about a specific event or fact, look for direct evidence in the memories.
+4. If the memories contain contradictory information, prioritize the most recent memory.
+5. Focus only on the memories of the two speakers. Do not confuse character names mentioned in memories with the actual users who created those memories.
+6. **Exhaustive for list questions**: If the question asks you to list items (e.g., “what games,” “which people,” “list all…”), you must search exhaustively and aggregate the results into a single, complete list.
+7. **Rules for inference and external knowledge**:
+* **Default: no inference**: Do not infer information that is not explicitly stated.
+* **Limited exception — geographic containment**: Only to confirm geographic hierarchy (city—state/province—country). Allowed: “Stamford→Connecticut,” “朝阳区→北京 (Chaoyang District→Beijing).” Forbidden: other external knowledge such as distance, population, etc.
+* **Limited exception — behavioral inference of emotions**: Only when
+   a) at least two non-contradictory behavioral clues strongly indicate that emotion, and
+   b) there is no contrary statement in the memories, and
+   c) you must explicitly state it is an inference and list the evidence used.
+* Example: To answer “Is James lonely?”—if the memories say “the only creatures that bring him joy are dogs” and “he is actively dating,” you may infer “likely lonely.” If there is “he loves his single life,” then you must not infer it.
+
+8. Time handling (STRICT)
+- Convert relative time to absolute **only when it can be uniquely determined** (e.g., “yesterday”, “two days ago”, “last year”, "next month").
+- For ambiguous expressions (e.g., “last week,” “early June,” “recently”), **do not output a specific date or range**. Keep the original phrasing in the final answer; in the reasoning you may cite the memory timestamp as context.
+
+# Answer style
+- Be concise and accurate.
+- Do not include explanations or reasoning. Output only the final answer string.
+
+Memories for user {{speaker_1_user_id}}:
+
+{{speaker_1_memories}}
+
+Memories for user {{speaker_2_user_id}}:
+
+{{speaker_2_memories}}
+
+Question: {{question}}
+
+Answer:
+"""
