@@ -290,7 +290,7 @@ class MemorySearch:
         answer_mode = self._normalize_mode(answer_mode)
         self.answer_mode = answer_mode
         self.qdrant_path = qdrant_path
-        self._max_parallelism_cap = max(1, min(os.cpu_count() or 4, 12))
+        self._max_parallelism_cap = max(1, min(os.cpu_count() * 2 or 8, 18))
         self.logger.info(
             "Using Qdrant path '%s' with collection '%s' for search reads.",
             self.qdrant_path,
@@ -364,6 +364,9 @@ class MemorySearch:
             elif answer_mode == "13":
                 from prompts import ANSWER_PROMPT_13
                 self.ANSWER_PROMPT = ANSWER_PROMPT_13
+            elif answer_mode == "14":
+                from prompts import ANSWER_PROMPT_14
+                self.ANSWER_PROMPT = ANSWER_PROMPT_14
             else:
                 self.logger.warning("Unknown answer_mode '%s'. Falling back to default prompt.", answer_mode)
                 self.ANSWER_PROMPT = ANSWER_PROMPT
