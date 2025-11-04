@@ -101,8 +101,8 @@ def main() -> int:
             mode_keys = _MODE_KEYS[len(values)]
             mode_repr = ", ".join(f"{k}={v}" for k, v in zip(mode_keys, values))
             print(f"\n[{idx}/{len(CONFIGS)}] Running with {mode_repr}")
-
             updated_config = apply_modes(original_config, values)
+            print(json.dumps(updated_config, ensure_ascii=False, indent=2))
             dump_config(config_path, updated_config)
             command = build_command(values, config_path)
             run_command(command, project_dir)

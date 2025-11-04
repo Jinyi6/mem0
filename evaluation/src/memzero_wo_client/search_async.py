@@ -170,6 +170,48 @@ class IncrementalResultsWriter:
         if self._temp_path.exists():
             self._temp_path.unlink()
 
+_NOISE_PATTERNS = [
+    r"\bcongrats\b", r"\bcongratulations\b", r"\bgood luck\b", r"\bgreat job\b",
+    r"\bnice!\b", r"\bawesome\b", r"\bamazing\b", r"\bthat'?s (great|awesome)\b",
+    r"\bsorry\b", r"\bapolog(y|ize|ies)\b", r"\bthanks\b", r"\bthank you\b",
+    r"\bglad to\b", r"\bcheer(s|ing)?\b"
+]
+_NOISE_QUESTION_PAT = r"\?\s*$"
+
+_ACTION_CANON = {
+    # 轻量同义簇（可持续补充）
+    "job_loss": [r"\blost (his|her|their)? job\b", r"\bfired\b", r"\blaid off\b"],
+    "business_open": [r"\b(open|start)(ed)? (an? )?(online )?(store|business|studio)\b"],
+    "studio_open": [r"\b(open|launch|set\s*up|establish|start|kick\s*off)(ed)? (an? )?(dance )?(studio|workshop)\b", r"\b(opening|launching) (an? )?(dance )?studio\b"],
+    "gym_start": [r"\bstart(ed)? (to )?go to the gym\b", r"\b(started|began) going to the gym\b", r"\bgo(es|ing)? to the gym\b"],
+    "color_pref": [r"\bfavorite color\b", r"\bfavourite colour\b"],
+}
+
+_MONTHS = {
+    "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
+    "july":7,"august":8,"september":9,"october":10,"november":11,"december":12
+}
+
+_TIME_KEYWORDS_CN = [
+    "什么时候", "几月", "几年", "哪年", "哪月", "哪天", "哪一天", "哪一周", "日期", "时间", "几点", "哪刻", "何时", "何年", "何月", "何日",
+    "星期几", "周几", "近日", "近期", "最近", "刚刚", "刚才", "方才", "不久前", "快要", "即将", "马上", "立刻",
+    "下周", "上周", "本周", "这周", "之前", "之后"
+]
+
+_TIME_KEYWORDS_EN = [
+    "when", "what date", "which year", "which month", "which day", "what day", "which week", "what time", "date", "time", "day",
+    "recent", "recently", "lately", "just", "soon", "upcoming", "shortly", "next week", "last week", "earlier", "later", "before", "after"
+]
+
+_NUMERIC_KEYWORDS_CN = [
+    "多少", "几", "第几", "多长时间", "几岁", "几次", "多少次", "几天", "多少天", "几周", "多少周", "几个月", "多少个月", "几人", "多少人", "几位",
+    "几个人", "人数", "几种", "几类", "几号", "几块钱", "多少金额", "多大", "多高", "多重"
+]
+
+_NUMERIC_KEYWORDS_EN = [
+    "how many", "how much", "how long", "how old", "how often", "how far", "how many people", "how many times", "how many days",
+    "how many years", "how many months", "how many hours", "how much time", "how much money", "how big", "how tall", "how heavy", "how far away"
+]
 
 class MemorySearch:
     """
@@ -370,12 +412,32 @@ class MemorySearch:
             elif answer_mode == "14.6":
                 from prompts import ANSWER_PROMPT_14_6
                 self.ANSWER_PROMPT = ANSWER_PROMPT_14_6
+            elif answer_mode == "14.7":
+                from prompts import ANSWER_PROMPT_14_7
+                self.ANSWER_PROMPT = ANSWER_PROMPT_14_7
             else:
                 self.logger.warning("Unknown answer_mode '%s'. Falling back to default prompt.", answer_mode)
                 self.ANSWER_PROMPT = ANSWER_PROMPT
 
         self.speaker_1_full_memories = []
         self.speaker_2_full_memories = []
+
+        # CrossEncoder score cache与方案148配置
+        self._ce_cache = {}
+        self._ce_cache_order = []
+        self._ce_cache_max = 4096
+        self._cfg_148 = {
+            "per_query_limit": 48,
+            "max_base_queries": 8,
+            "max_prf_queries": 2,
+            "mmr_lambda_time": 0.75,
+            "mmr_lambda_default": 0.60,
+            "noise_penalty": 0.35,
+            "rrf_c_small": 10,
+            "rrf_c_large": 40,
+            "small_pool_thresh": 30,
+            "timeline_subject_cap": 12,
+        }
             
     @staticmethod
     def _derive_collection_name(qdrant_path: str) -> str:
@@ -460,6 +522,806 @@ class MemorySearch:
         display_ts = item.get("timestamp_display") or item.get("timestamp") or ""
         memory_text = item.get("memory", "")
         return f"{display_ts}: {memory_text}"
+
+    def _is_noise_text(self, text: str) -> bool:
+        t = (text or "").lower().strip()
+        if not t:
+            return True
+        import re
+        for pat in _NOISE_PATTERNS:
+            if re.search(pat, t):
+                return True
+        if re.search(_NOISE_QUESTION_PAT, t):  # 纯问句
+            return True
+        if re.search(r"!{2,}\s*$", t):  # 强情绪感叹句
+            return True
+        # 轻量规则：表达同情/询问
+        if "expressed sympathy" in t or t.startswith(("did ", "do ", "what ", "why ", "how ", "when ")):
+            return True
+        return False
+
+    def _extract_candidate_names(self, text: str):
+        import re
+
+        if not text:
+            return []
+
+        names = set()
+        try:
+            lower_text = text.lower()
+
+            stop_words = {
+                "I", "The", "A", "An", "And", "But", "For", "From", "This", "That", "Those", "These",
+                "He", "She", "They", "We", "You", "It", "His", "Her", "Their", "Our", "Its",
+                "When", "What", "Where", "Why", "How", "If", "In", "On", "At", "By", "With",
+                "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+                "January", "February", "March", "April", "May", "June", "July", "August", "September",
+                "October", "November", "December", "Earlier", "Later"
+            }
+            stop_words_lower = {w.lower() for w in stop_words}
+
+            if re.search(r"\buser\b", lower_text):
+                names.add("user")
+
+            colon_pattern = re.compile(r"^\s*([A-Za-z0-9_\-\u4e00-\u9fff]{2,})\s*:", re.MULTILINE)
+            for raw in colon_pattern.findall(text):
+                token_lower = raw.strip().lower()
+                if token_lower and token_lower not in stop_words_lower:
+                    names.add(token_lower)
+
+            courtesy_pattern = re.compile(r"\b(Mr|Mrs|Ms|Miss|Dr|Prof)\.?\s+([A-Za-z][A-Za-z\-]+)\b", re.IGNORECASE)
+            for _, raw in courtesy_pattern.findall(text):
+                token_lower = raw.lower()
+                if token_lower not in stop_words_lower:
+                    names.add(token_lower)
+
+            apostrophe_pattern = re.compile(r"\b([A-Za-z\u4e00-\u9fff][A-Za-z\u4e00-\u9fff]+)'s\b")
+            for raw in apostrophe_pattern.findall(text):
+                token_lower = raw.lower()
+                if token_lower not in stop_words_lower:
+                    names.add(token_lower)
+
+            capital_tokens = re.findall(r"\b[A-Z][a-z]+(?:-[A-Z][a-z]+)?\b", text)
+            for token in capital_tokens:
+                token_lower = token.lower()
+                if token_lower not in stop_words_lower:
+                    names.add(token_lower)
+
+            chinese_label_pattern = re.compile(r"([\u4e00-\u9fff]{2,4})(?:：|:)")
+            for token in chinese_label_pattern.findall(text):
+                names.add(token)
+
+            return sorted(names)
+        except Exception:
+            return sorted(names)
+
+    def _extract_subjects_from_question(self, q: str):
+        return self._extract_candidate_names(q)
+
+    def _subject_bonus(self, text: str, subjects: list) -> float:
+        if not subjects:
+            return 0.0
+        t = (text or "").lower()
+        unique_subjects = {s for s in subjects if s}
+        hits = sum(1 for s in unique_subjects if s in t)
+        return min(0.6, 0.3 * hits)
+
+    def _lexical_score(self, q: str, text: str) -> float:
+        import re, math
+        def toks(s):
+            return re.findall(r"\b\w+\b", (s or "").lower())
+        q_tokens = toks(q)
+        t_tokens = toks(text)
+        if not q_tokens or not t_tokens:
+            return 0.0
+        q_set, t_set = set(q_tokens), set(t_tokens)
+        overlap = len(q_set & t_set)
+        # bigram overlap（弱 BM25）
+        def bigrams(xs): return set(zip(xs, xs[1:])) if len(xs) > 1 else set()
+        bo = len(bigrams(q_tokens) & bigrams(t_tokens))
+        return overlap * 0.6 + bo * 0.9
+
+    def _question_is_time_intent(self, q: str) -> bool:
+        q = q or ""
+        ql = q.lower()
+        return any(kw in q for kw in _TIME_KEYWORDS_CN) or any(kw in ql for kw in _TIME_KEYWORDS_EN)
+
+    def _parse_month_in_question(self, q: str):
+        # 返回 {year: int|None, month: int|None}
+        import re
+        ql = (q or "").lower()
+        # 年
+        year = None
+        m = re.search(r"\b(20\d{2})\b", ql)
+        if m:
+            year = int(m.group(1))
+        # 月
+        month = None
+        for name, mi in _MONTHS.items():
+            if name in ql:
+                month = mi
+                break
+        return {"year": year, "month": month}
+
+    def _extract_norm_date_from_memory(self, text: str):
+        """解析记忆中的时间片段：返回 (year, month, day)，若不存在则为 None"""
+        import re
+
+        t = text or ""
+
+        # ISO / 数字型日期：2023-03-05、2023/3/5、2023.03、03/2023
+        m = re.search(r"\b(20\d{2})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?\b", t)
+        if m:
+            year = int(m.group(1))
+            month = int(m.group(2))
+            day = int(m.group(3)) if m.group(3) else None
+            return year, month, day
+
+        m = re.search(r"\b(\d{1,2})[/-](20\d{2})\b", t)
+        if m:
+            month = int(m.group(1))
+            year = int(m.group(2))
+            return year, month, None
+
+        # 英文日期：March 5, 2023 / 5 March 2023 / March 2023
+        mon = r"(january|february|march|april|may|june|july|august|september|october|november|december)"
+        m = re.search(fr"\b{mon}\s+(\d{{1,2}})(?:st|nd|rd|th)?\,?\s+(20\d{{2}})\b", t, flags=re.I)
+        if m:
+            year = int(m.group(3))
+            month = _MONTHS.get(m.group(1).lower())
+            day = int(m.group(2))
+            return year, month, day
+        m = re.search(fr"\b(\d{{1,2}})\s+{mon}\s+(20\d{{2}})\b", t, flags=re.I)
+        if m:
+            day = int(m.group(1))
+            month = _MONTHS.get(m.group(2).lower())
+            year = int(m.group(3))
+            return year, month, day
+        m = re.search(fr"\b{mon}\s+(20\d{{2}})\b", t, flags=re.I)
+        if m:
+            year = int(m.group(2))
+            month = _MONTHS.get(m.group(1).lower())
+            return year, month, None
+
+        # 中文日期：2023年3月5日 / 2023年3月 / 3月5日2023年
+        m = re.search(r"(20\d{2})年(\d{1,2})月(\d{1,2})?日?", t)
+        if m:
+            year = int(m.group(1))
+            month = int(m.group(2))
+            day = int(m.group(3)) if m.group(3) else None
+            return year, month, day
+        m = re.search(r"(\d{1,2})月(\d{1,2})?日?,?\s*(20\d{2})年?", t)
+        if m:
+            month = int(m.group(1))
+            day = int(m.group(2)) if m.group(2) else None
+            year = int(m.group(3))
+            return year, month, day
+        m = re.search(r"(20\d{2})年", t)
+        if m:
+            return int(m.group(1)), None, None
+
+        return None, None, None
+
+    def _time_bonus(self, q: str, mem_text: str) -> float:
+        if not self._question_is_time_intent(q):
+            return 0.0
+        wanted = self._parse_month_in_question(q)  # 可能只有 year/month 之一
+        y, m, d = self._extract_norm_date_from_memory(mem_text)
+        score = 0.0
+        if wanted["year"] and y == wanted["year"]:
+            score += 0.6
+        if wanted["month"] and m == wanted["month"]:
+            score += 0.8
+        return score
+
+    def _canonical_action(self, text: str):
+        import re
+        t = (text or "").lower()
+        for canon, pats in _ACTION_CANON.items():
+            for pat in pats:
+                if re.search(pat, t):
+                    return canon
+        return None
+
+    def _action_bonus(self, q: str, mem_text: str) -> float:
+        q_act = self._canonical_action(q)
+        if not q_act:
+            return 0.0
+        m_act = self._canonical_action(mem_text)
+        return 0.7 if m_act and (m_act == q_act) else 0.0
+
+    def _rrf(self, ranks: list, c: int = 60) -> float:
+        """ranks: [rank_from_embed (1-based or None), rank_from_lex (…), rank_from_xenc (…)]"""
+        s = 0.0
+        for r in ranks:
+            if r is not None and r > 0:
+                s += 1.0 / (c + r)
+        return s
+
+    def _final_score_145(self, q, mem, rank_embed, rank_lex, rank_xenc):
+        base = self._rrf([rank_embed, rank_lex, rank_xenc], c=60)
+        bonus = self._subject_bonus(mem["memory"], self._extract_subjects_from_question(q))
+        bonus += self._action_bonus(q, mem["memory"])
+        bonus += 0.15 * float(mem.get("score", 0.0))  # 轻度保留原 embedding 分
+        if self._is_noise_text(mem["memory"]):
+            base -= 0.35  # 噪声轻扣
+        return base + bonus
+
+    def _final_score_146(self, q, mem, rank_embed, rank_lex, rank_xenc):
+        base = self._rrf([rank_embed, rank_lex, rank_xenc], c=40)
+        bonus = self._time_bonus(q, mem["memory"])
+        bonus += self._action_bonus(q, mem["memory"])
+        bonus += self._subject_bonus(mem["memory"], self._extract_subjects_from_question(q))
+        if self._is_noise_text(mem["memory"]):
+            base -= 0.35
+        return base + bonus
+
+    # ==== 方案 148：意图驱动混合检索工具 ====
+    def _intent_148(self, q: str):
+        import re
+
+        q = q or ""
+        ql = q.lower()
+        is_time = any(kw in q for kw in _TIME_KEYWORDS_CN) or any(kw in ql for kw in _TIME_KEYWORDS_EN)
+        has_year = bool(re.search(r"\b(20\d{2})\b", ql))
+        has_month = any(m in ql for m in _MONTHS.keys()) or bool(re.search(r"\b(0?[1-9]|1[0-2])\b", ql))
+        recent_cn = ["近期", "最近", "刚刚", "刚才", "不久前"]
+        recent_en = ["recent", "recently", "lately", "just"]
+        want_recent = any(kw in q for kw in recent_cn) or any(kw in ql for kw in recent_en)
+        is_numeric = any(kw in q for kw in _NUMERIC_KEYWORDS_CN) or any(kw in ql for kw in _NUMERIC_KEYWORDS_EN)
+        subjects = self._extract_subjects_from_question(q)
+        action = self._canonical_action(q)
+        return {
+            "is_time": is_time,
+            "has_year": has_year,
+            "has_month": has_month,
+            "want_recent": want_recent,
+            "is_numeric": is_numeric,
+            "subjects": subjects,
+            "action": action,
+        }
+
+    def _gen_queries_148(self, q: str, intent: dict):
+        import re
+
+        queries = []
+        seen = set()
+
+        def add(candidate: str):
+            if not candidate:
+                return
+            norm = re.sub(r"\s+", " ", candidate.strip())
+            if not norm:
+                return
+            key = norm.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            queries.append(norm)
+
+        add(q)
+
+        stripped = re.sub(r"\b(what|when|where|who|why|how)\b", "", q, flags=re.I)
+        stripped = re.sub(r"\s+", " ", stripped).strip()
+        if stripped and stripped.lower() != q.lower():
+            add(stripped)
+
+        ym = re.findall(r"(20\d{2})|(\d{1,2}\s*月)", q)
+        if ym:
+            add(" ".join([x for pair in ym for x in pair if x]))
+
+        action = intent.get("action")
+        if action in {"business_open", "studio_open"}:
+            add("open start launch set up establish studio business store dance studio")
+        elif action == "gym_start":
+            add("start going to the gym go to gym started gym")
+
+        keywords = []
+        kw_model = self._ensure_keybert_model()
+        if kw_model:
+            try:
+                pairs = kw_model.extract_keywords(
+                    q,
+                    keyphrase_ngram_range=(1, 3),
+                    stop_words="english",
+                    top_n=3,
+                    use_mmr=True,
+                    diversity=0.7,
+                )
+                keywords = [item[0] for item in pairs][:3]
+            except Exception:
+                keywords = []
+        if not keywords:
+            stop_words = {
+                "what",
+                "when",
+                "where",
+                "who",
+                "why",
+                "how",
+                "the",
+                "a",
+                "an",
+                "and",
+                "or",
+                "but",
+                "in",
+                "on",
+                "at",
+                "to",
+                "for",
+                "with",
+                "about",
+                "is",
+                "are",
+                "was",
+                "were",
+            }
+            tokens = [w for w in re.findall(r"\b\w+\b", q.lower()) if len(w) > 2 and w not in stop_words]
+            keywords = tokens[:3]
+        for kw in keywords:
+            add(kw)
+
+        return queries[: self._cfg_148["max_base_queries"]]
+
+    def _ce_rank_map(self, q: str, cands: list):
+        xenc = self._ensure_reranker_model()
+        if not xenc or not cands:
+            return {}
+
+        import hashlib
+
+        def _hash(text: str) -> str:
+            return hashlib.md5((text or "").encode("utf-8")).hexdigest()
+
+        q_hash = _hash(q)
+        scores = [None] * len(cands)
+        missing = []
+        for idx, mem in enumerate(cands):
+            key = (q_hash, _hash(mem.get("memory", "")))
+            cached = self._ce_cache.get(key)
+            if cached is not None:
+                scores[idx] = cached
+            else:
+                missing.append((idx, key))
+
+        if missing:
+            pairs = [[q, cands[idx]["memory"]] for idx, _ in missing]
+            try:
+                preds = xenc.predict(pairs, show_progress_bar=False)
+                for (idx, key), val in zip(missing, preds):
+                    score = float(val)
+                    scores[idx] = score
+                    self._ce_cache[key] = score
+                    self._ce_cache_order.append(key)
+                    if len(self._ce_cache_order) > self._ce_cache_max:
+                        old_key = self._ce_cache_order.pop(0)
+                        self._ce_cache.pop(old_key, None)
+            except Exception:
+                return {}
+
+        ordering = sorted(range(len(cands)), key=lambda j: float(scores[j]), reverse=True)
+        return {id(cands[j]): rank + 1 for rank, j in enumerate(ordering)}
+
+    def _numeric_bonus_148(self, intent: dict, text: str) -> float:
+        if not intent.get("is_numeric"):
+            return 0.0
+        if not text:
+            return 0.0
+        import re
+
+        has_num = bool(re.search(r"\d", text))
+        units_pattern = r"(次|天|周|月|年|小时|分钟|岁|人|people|times|days|weeks|months|years|hours|minutes)"
+        has_unit = bool(re.search(units_pattern, text.lower()))
+        if has_num and has_unit:
+            return 0.5
+        if has_num:
+            return 0.25
+        return 0.0
+
+    def _recency_weight_148(self, intent: dict) -> float:
+        if intent.get("want_recent") and not (intent.get("has_year") or intent.get("has_month")):
+            return 0.25
+        return 0.0
+
+    def _rrf_sum(self, ranks: list, c: int) -> float:
+        total = 0.0
+        for rank in ranks:
+            if rank and rank > 0:
+                total += 1.0 / (c + rank)
+        return total
+
+    def _final_score_148(self, q: str, mem: dict, ranks: dict, intent: dict, pool_size: int) -> float:
+        c_value = self._cfg_148["rrf_c_small"] if pool_size < self._cfg_148["small_pool_thresh"] else self._cfg_148["rrf_c_large"]
+        base = self._rrf_sum([ranks.get("embed"), ranks.get("lex"), ranks.get("xenc")], c=c_value)
+        base += 0.12 * float(mem.get("score", 0.0))
+
+        if self._is_noise_text(mem.get("memory", "")):
+            base -= self._cfg_148["noise_penalty"]
+
+        base += self._subject_bonus(mem.get("memory", ""), intent.get("subjects") or [])
+        base += self._action_bonus(q, mem.get("memory", ""))
+
+        time_bonus = self._time_bonus(q, mem.get("memory", ""))
+        if intent.get("is_time"):
+            if intent.get("has_month") or intent.get("has_year"):
+                base += 1.1 * time_bonus
+            else:
+                base += 0.7 * time_bonus
+
+        if intent.get("is_time"):
+            y, m, d = self._extract_norm_date_from_memory(mem.get("memory", ""))
+            if not (y or m or d):
+                base -= 0.3
+
+        base += self._numeric_bonus_148(intent, mem.get("memory", ""))
+
+        rec_weight = self._recency_weight_148(intent)
+        if rec_weight > 0.0:
+            now_ts = datetime.now(tz=timezone.utc).timestamp()
+            ts = mem.get("timestamp_epoch") or 0.0
+            if ts > 0.0:
+                decay = math.exp(-math.log(2.0) * max(0.0, (now_ts - ts) / 86400.0 / 7.0))
+                base += rec_weight * decay
+
+        return base
+
+    def _mmr_select_148(self, candidates: list, k: int, lambda_div: float) -> list:
+        import re
+
+        def tokens(text: str):
+            return set(re.findall(r"\b\w+\b", (text or "").lower()))
+
+        def jaccard(a: str, b: str) -> float:
+            ta, tb = tokens(a), tokens(b)
+            if not ta or not tb:
+                return 0.0
+            return len(ta & tb) / float(len(ta | tb))
+
+        remaining = list(candidates)
+        selected = []
+        chosen_texts = []
+        while remaining and len(selected) < k:
+            best_item = None
+            best_val = -1e9
+            for item in remaining:
+                relevance = float(item.get("__final__", 0.0))
+                diversity = max((jaccard(item.get("memory", ""), txt) for txt in chosen_texts), default=0.0)
+                value = lambda_div * relevance - (1.0 - lambda_div) * diversity
+                if value > best_val:
+                    best_val = value
+                    best_item = item
+            selected.append(best_item)
+            chosen_texts.append(best_item.get("memory", ""))
+            remaining.remove(best_item)
+        return selected
+
+    def _search_148(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        cfg = self._cfg_148
+        intent = self._intent_148(question)
+        base_queries = self._gen_queries_148(question, intent)
+
+        time_map = {speaker_1_user_id: 0.0, speaker_2_user_id: 0.0}
+
+        def recall(uid):
+            collected = {}
+            spent = 0.0
+            for q in base_queries:
+                mems, _, elapsed = self.search_memory(uid, q, limit=cfg["per_query_limit"])
+                spent += float(elapsed or 0.0)
+                for mem in mems:
+                    key = mem["memory"]
+                    if key not in collected or float(mem["score"]) > float(collected[key]["score"]):
+                        collected[key] = mem
+            return collected, spent
+
+        a_map, time_map[speaker_1_user_id] = recall(speaker_1_user_id)
+        b_map, time_map[speaker_2_user_id] = recall(speaker_2_user_id)
+
+        def prf_expand(collected, uid, spent):
+            if len(collected) >= max(3 * top_k, 60):
+                return collected, spent
+            top_pool = sorted(collected.values(), key=lambda x: float(x.get("score", 0.0)), reverse=True)[:20]
+            prf_text = " \n".join(mem["memory"] for mem in top_pool)
+            terms = []
+            kw_model = self._ensure_keybert_model()
+            if kw_model and prf_text:
+                try:
+                    pairs = kw_model.extract_keywords(
+                        prf_text,
+                        keyphrase_ngram_range=(1, 3),
+                        stop_words="english",
+                        top_n=4,
+                        use_mmr=True,
+                        diversity=0.7,
+                    )
+                    terms = [p[0] for p in pairs][:4]
+                except Exception:
+                    terms = []
+            if not terms:
+                import re
+
+                tokens = [w for w in re.findall(r"\b\w+\b", prf_text.lower()) if len(w) > 2]
+                terms = tokens[:4]
+            prf_queries = [" ".join(terms[:2]), " ".join(terms[2:4])]
+            for q in prf_queries[: cfg["max_prf_queries"]]:
+                if not q:
+                    continue
+                mems, _, elapsed = self.search_memory(uid, q, limit=cfg["per_query_limit"])
+                spent += float(elapsed or 0.0)
+                for mem in mems:
+                    key = mem["memory"]
+                    if key not in collected or float(mem["score"]) > float(collected[key]["score"]):
+                        collected[key] = mem
+            return collected, spent
+
+        a_map, time_map[speaker_1_user_id] = prf_expand(a_map, speaker_1_user_id, time_map[speaker_1_user_id])
+        b_map, time_map[speaker_2_user_id] = prf_expand(b_map, speaker_2_user_id, time_map[speaker_2_user_id])
+
+        def rank(uid_map):
+            candidates = list(uid_map.values())
+            if not candidates:
+                return []
+
+            embed_rank = {
+                id(mem): idx + 1
+                for idx, mem in enumerate(sorted(candidates, key=lambda x: float(x.get("score", 0.0)), reverse=True))
+            }
+            lex_rank = {
+                id(mem): idx + 1
+                for idx, mem in enumerate(sorted(candidates, key=lambda x: self._lexical_score(question, x["memory"]), reverse=True))
+            }
+            x_rank = self._ce_rank_map(question, candidates)
+
+            scored = []
+            for mem in candidates:
+                ranks = {
+                    "embed": embed_rank.get(id(mem)),
+                    "lex": lex_rank.get(id(mem)),
+                    "xenc": x_rank.get(id(mem)),
+                }
+                score = self._final_score_148(question, mem, ranks, intent, pool_size=len(candidates))
+                mem["__final__"] = score
+                scored.append(mem)
+
+            scored.sort(key=lambda m: m["__final__"], reverse=True)
+            lam = cfg["mmr_lambda_time"] if intent.get("is_time") else cfg["mmr_lambda_default"]
+            picked = self._mmr_select_148(scored, k=top_k, lambda_div=lam)
+            return [self._format_memory_line(mem) for mem in picked]
+
+        return rank(a_map), rank(b_map), time_map.get(speaker_1_user_id, 0.0), time_map.get(speaker_2_user_id, 0.0)
+
+    # ==== 方案 145：噪声感知混合检索 ====
+    def _search_145(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        # 1) 先用基础检索拿候选（沿用你已有的 search_memory + 关键词/子问扩展都可）
+        base_qs = []
+        seen_qs = set()
+
+        def _add_query(candidate: str):
+            if not candidate:
+                return
+            norm = re.sub(r"\s+", " ", candidate.strip())
+            if not norm:
+                return
+            key = norm.lower()
+            if key in seen_qs:
+                return
+            seen_qs.add(key)
+            base_qs.append(norm)
+
+        _add_query(question)
+
+        stripped = re.sub(r"\b(what|when|where|who|why|how)\b", "", question, flags=re.I)
+        stripped = re.sub(r"\s+", " ", stripped).strip()
+        _add_query(stripped)
+
+        short_terms = []
+        short_terms.extend(re.findall(r"20\d{2}", question))
+        short_terms.extend(re.findall(r"\d{1,2}\s*月", question))
+        short_terms.extend(re.findall(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b", question, flags=re.I))
+        if short_terms:
+            _add_query(" ".join(short_terms[:4]))
+
+        a_map, b_map = {}, {}
+        time_map = {speaker_1_user_id: 0.0, speaker_2_user_id: 0.0}
+        for q in base_qs:
+            for uid in [speaker_1_user_id, speaker_2_user_id]:
+                mems, _, elapsed = self.search_memory(uid, q, limit=max(60, top_k*5))
+                time_map[uid] = time_map.get(uid, 0.0) + float(elapsed or 0.0)
+                for m in mems:
+                    # 过滤明显噪声
+                    if self._is_noise_text(m["memory"]):
+                        continue
+                    key = m["memory"]
+                    dst = a_map if uid == speaker_1_user_id else b_map
+                    if key not in dst or float(m["score"]) > float(dst[key]["score"]):
+                        dst[key] = m
+
+        # 2) 为每一侧做 lexical 与可选 CrossEncoder 评分
+        def score_side(q, mem_map):
+            cands = list(mem_map.values())
+            # lexical ranks
+            lex_rank = {
+                id(m): r + 1
+                for r, m in enumerate(
+                    sorted(cands, key=lambda x: self._lexical_score(q, x["memory"]), reverse=True)
+                )
+            }
+            # cross-encoder (可用则启用)
+            xenc = self._ensure_reranker_model()
+            x_rank = {}
+            if xenc is not None and cands:
+                pairs = [[q, m["memory"]] for m in cands]
+                try:
+                    xs = xenc.predict(pairs, show_progress_bar=False)
+                    order = sorted(range(len(cands)), key=lambda j: float(xs[j]), reverse=True)
+                    x_rank = {id(cands[j]): idx + 1 for idx, j in enumerate(order)}
+                except Exception:
+                    x_rank = {}
+            # embed rank 用原 score 排序
+            embed_rank = {
+                id(m): r + 1
+                for r, m in enumerate(
+                    sorted(cands, key=lambda x: float(x.get("score", 0)), reverse=True)
+                )
+            }
+            # 组合分
+            scored = []
+            for m in cands:
+                rid = id(m)
+                r_embed = embed_rank.get(rid)
+                r_lex = lex_rank.get(rid)
+                fs = self._final_score_145(q, m, r_embed, r_lex, x_rank.get(rid))
+                m["__final__"] = fs
+                scored.append(m)
+            return [self._format_memory_line(m) for m in sorted(scored, key=lambda x: x["__final__"], reverse=True)[:top_k]]
+
+        s1 = score_side(question, a_map)
+        s2 = score_side(question, b_map)
+        return s1, s2, time_map.get(speaker_1_user_id, 0.0), time_map.get(speaker_2_user_id, 0.0)
+
+    # ==== 方案 146：时间目标化检索（TIME intent 强化） ====
+    def _search_146(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        # 仅时间意图题目启用强化；否则退化到 145
+        if not self._question_is_time_intent(question):
+            return self._search_145(speaker_1_user_id, speaker_2_user_id, question, top_k)
+        # 初检
+        a_map, b_map = {}, {}
+        time_map = {speaker_1_user_id: 0.0, speaker_2_user_id: 0.0}
+        for uid in [speaker_1_user_id, speaker_2_user_id]:
+            mems, _, elapsed = self.search_memory(uid, question, limit=max(80, top_k*6))
+            time_map[uid] = time_map.get(uid, 0.0) + float(elapsed or 0.0)
+            for m in mems:
+                # 噪声先过滤
+                if self._is_noise_text(m["memory"]):
+                    continue
+                key = m["memory"]
+                dst = a_map if uid == speaker_1_user_id else b_map
+                if key not in dst or float(m["score"]) > float(dst[key]["score"]):
+                    dst[key] = m
+
+        # 时间门控：优先保留含规范化时间/月份/年份的记忆
+        def time_gate(mem_map):
+            cands = list(mem_map.values())
+            gated = []
+            for m in cands:
+                y,mn,dd = self._extract_norm_date_from_memory(m["memory"])
+                if y or mn or dd:
+                    gated.append(m)
+            return gated if gated else cands  # 没有也不空
+
+        def score_side(q, mem_map):
+            cands = time_gate(mem_map)
+            # 计算各自 rank
+            embed_rank = {id(m): r+1 for r,m in enumerate(sorted(cands, key=lambda x: float(x.get("score",0)), reverse=True))}
+            lex_rank = {id(m): r+1 for r,m in enumerate(sorted(cands, key=lambda x: self._lexical_score(q, x["memory"]), reverse=True))}
+            xenc = self._ensure_reranker_model()
+            ranks_x = {}
+            if xenc and cands:
+                pairs = [[q, m["memory"]] for m in cands]
+                try:
+                    xs = xenc.predict(pairs, show_progress_bar=False)
+                    order = sorted(range(len(cands)), key=lambda j: float(xs[j]), reverse=True)
+                    for pos, j in enumerate(order):
+                        ranks_x[id(cands[j])] = pos+1
+                except Exception:
+                    pass
+            # 组合
+            scored = []
+            for m in cands:
+                rid = id(m)
+                fs = self._final_score_146(q, m, embed_rank.get(rid), lex_rank.get(rid), ranks_x.get(rid))
+                m["__final__"] = fs
+                scored.append(m)
+            return [self._format_memory_line(m) for m in sorted(scored, key=lambda x: x["__final__"], reverse=True)[:top_k]]
+
+        return (
+            score_side(question, a_map),
+            score_side(question, b_map),
+            time_map.get(speaker_1_user_id, 0.0),
+            time_map.get(speaker_2_user_id, 0.0),
+        )
+
+    # ==== 方案 147：图/时间线联合检索（轻量） ====
+    def _build_timeline_index(self, all_mems):
+        """
+        构建: (subject, action_canonical) -> [mem_items sorted by time]
+        all_mems: [{'memory': str, 'timestamp':..., 'timestamp_epoch':..., 'score':...}, ...]
+        """
+        from collections import defaultdict, Counter
+        bucket = defaultdict(list)
+        subject_counts = Counter()
+        for m in all_mems:
+            mem_text = m.get("memory") or ""
+            names = self._extract_candidate_names(mem_text)
+            if not names:
+                continue
+            act = self._canonical_action(mem_text)
+            if not act:
+                continue
+            y, mn, dd = self._extract_norm_date_from_memory(mem_text)
+            ts = m.get("timestamp_epoch") or 0
+            for name in names:
+                key_name = name.lower() if isinstance(name, str) else name
+                bucket[(key_name, act)].append((ts, y, mn, dd, m))
+                subject_counts[key_name] += 1
+        # sort by time epoch (or keep insertion)
+        for k in bucket:
+            bucket[k].sort(key=lambda x: ((x[0] or 0) == 0, x[0] or 0.0))
+        return bucket, subject_counts
+
+    def _search_147(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        # 拉两边较多的记忆（一次即可，可以做缓存）
+        a_all, _, a_time = self.search_memory(speaker_1_user_id, "get all", limit=500)
+        b_all, _, b_time = self.search_memory(speaker_2_user_id, "get all", limit=500)
+        idx_a, counts_a = self._build_timeline_index(a_all)
+        idx_b, counts_b = self._build_timeline_index(b_all)
+        # 解析问题主体与动作
+        available_subjects = {sub for (sub, _) in idx_a.keys()} | {sub for (sub, _) in idx_b.keys()}
+        subs = list(dict.fromkeys(self._extract_subjects_from_question(question)))
+        combined_counts = counts_a + counts_b
+        if not subs:
+            cap = max(1, self._cfg_148.get("timeline_subject_cap", 12))
+            subs = [name for name, _ in combined_counts.most_common(cap)]
+        subs = [s for s in subs if s in available_subjects][: max(1, self._cfg_148.get("timeline_subject_cap", 12))]
+        act = self._canonical_action(question)
+        if not act:
+            # 回退 146（若时间题）或 145
+            if self._question_is_time_intent(question):
+                return self._search_146(speaker_1_user_id, speaker_2_user_id, question, top_k)
+            return self._search_145(speaker_1_user_id, speaker_2_user_id, question, top_k)
+        if not subs:
+            if self._question_is_time_intent(question):
+                return self._search_146(speaker_1_user_id, speaker_2_user_id, question, top_k)
+            return self._search_145(speaker_1_user_id, speaker_2_user_id, question, top_k)
+
+        def pick_from(idx):
+            cands = []
+            for s in subs:
+                cands.extend(idx.get((s, act), []))
+            cands = [m[-1] for m in cands]  # strip meta
+            if not cands:
+                return []
+            # 进一步用 cross-encoder 验证 + 轻量词匹配
+            xenc = self._ensure_reranker_model()
+            xs = None
+            if xenc:
+                pairs = [[question, m["memory"]] for m in cands]
+                try:
+                    xs = xenc.predict(pairs, show_progress_bar=False)
+                except Exception:
+                    xs = None
+            scored = []
+            for i, m in enumerate(cands):
+                rr = float(xs[i]) if xs is not None else 0.0
+                lx = self._lexical_score(question, m["memory"])
+                tb = self._time_bonus(question, m["memory"])
+                fs = 0.6*rr + 0.3*lx + 0.4*tb  # 时间题强权重
+                m["__final__"] = fs
+                scored.append(m)
+            return [self._format_memory_line(m) for m in sorted(scored, key=lambda x: x["__final__"], reverse=True)[:top_k]]
+
+        return pick_from(idx_a), pick_from(idx_b), float(a_time or 0.0), float(b_time or 0.0)
 
     def _record_result(self, conversation_idx: int, result):
         """
@@ -1497,6 +2359,22 @@ class MemorySearch:
                 speaker_1_time,
                 speaker_2_time,
             )
+        
+        elif search_method == "14.5":
+            s1, s2, t1, t2 = self._search_145(speaker_1_user_id, speaker_2_user_id, question, self.top_k)
+            return (s1, s2, None, None, t1, t2)
+
+        elif search_method == "14.6":
+            s1, s2, t1, t2 = self._search_146(speaker_1_user_id, speaker_2_user_id, question, self.top_k)
+            return (s1, s2, None, None, t1, t2)
+
+        elif search_method == "14.7":
+            s1, s2, t1, t2 = self._search_147(speaker_1_user_id, speaker_2_user_id, question, self.top_k)
+            return (s1, s2, None, None, t1, t2)
+
+        elif search_method == "14.8":
+            s1, s2, t1, t2 = self._search_148(speaker_1_user_id, speaker_2_user_id, question, self.top_k)
+            return (s1, s2, None, None, t1, t2)
 
         else:
             # ========== 默认搜索方法 ==========
