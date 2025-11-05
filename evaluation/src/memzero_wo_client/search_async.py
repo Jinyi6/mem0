@@ -864,6 +864,50 @@ class MemorySearch:
 
         return queries[: self._cfg_148["max_base_queries"]]
 
+    def _ce_predict_cached(self, q: str, cands: list):
+        """
+        获取 CrossEncoder 分数并复用类内缓存，失败时返回 None。
+        """
+        xenc = self._ensure_reranker_model()
+        if not xenc or not cands:
+            return None
+
+        import hashlib
+
+        def _hash(text: str) -> str:
+            return hashlib.md5((text or "").encode("utf-8")).hexdigest()
+
+        q_hash = _hash(q)
+        scores = [None] * len(cands)
+        missing = []
+        for idx, mem in enumerate(cands):
+            key = (q_hash, _hash(mem.get("memory", "")))
+            cached = self._ce_cache.get(key)
+            if cached is not None:
+                scores[idx] = cached
+            else:
+                missing.append((idx, key))
+
+        if missing:
+            pairs = [[q, cands[idx]["memory"]] for idx, _ in missing]
+            try:
+                preds = xenc.predict(pairs, show_progress_bar=False)
+            except Exception:
+                return None
+            for (idx, key), val in zip(missing, preds):
+                score = float(val)
+                scores[idx] = score
+                self._ce_cache[key] = score
+                self._ce_cache_order.append(key)
+                if len(self._ce_cache_order) > self._ce_cache_max:
+                    old_key = self._ce_cache_order.pop(0)
+                    self._ce_cache.pop(old_key, None)
+
+        for idx, score in enumerate(scores):
+            if score is None:
+                scores[idx] = float(cands[idx].get("score", 0.0))
+        return scores
+
     def _ce_rank_map(self, q: str, cands: list):
         xenc = self._ensure_reranker_model()
         if not xenc or not cands:
@@ -1090,6 +1134,438 @@ class MemorySearch:
             return [self._format_memory_line(mem) for mem in picked]
 
         return rank(a_map), rank(b_map), time_map.get(speaker_1_user_id, 0.0), time_map.get(speaker_2_user_id, 0.0)
+
+    def _search_1410(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        PRF_K = 20
+        MAX_KEYWORDS = 5
+        PRF_KEYWORDS = 6
+        MAX_WORKERS = min(3, self._max_parallelism_cap)
+        RERANK_WEIGHT = 0.8
+        BOOST_ALPHA = 0.3
+        NOISE_PENALTY = -0.2
+        STRUCTURED_MARKER_PREFIXES = ("NUM:", "YEAR:", "MONTH:", "YM:")
+
+        intent = self._intent_148(question)
+        if intent.get("want_recent"):
+            RECENCY_WEIGHT = 0.35
+            HALF_LIFE_DAYS = 3.0
+        elif intent.get("is_time"):
+            RECENCY_WEIGHT = 0.25
+            HALF_LIFE_DAYS = 5.0
+        else:
+            RECENCY_WEIGHT = 0.15
+            HALF_LIFE_DAYS = 14.0
+        LAMBDA_DIV = 0.85 if intent.get("is_time") else 0.75
+
+        def _safe_lower_tokens(text):
+            try:
+                return re.findall(r"\b\w+\b", (text or "").lower())
+            except Exception:
+                return []
+
+        def _jaccard_sim(a_text, b_text):
+            a = set(_safe_lower_tokens(a_text))
+            b = set(_safe_lower_tokens(b_text))
+            if not a or not b:
+                return 0.0
+            return len(a & b) / float(len(a | b))
+
+        def _mmr_select(candidates, relevance_scores, k, lambda_div=0.6):
+            selected = []
+            selected_texts = []
+            remaining = list(candidates)
+            while remaining and len(selected) < k:
+                best_item = None
+                best_val = -1e9
+                for item in remaining:
+                    mem_text = item.get("memory", "")
+                    rel = relevance_scores.get(mem_text, 0.0)
+                    if selected_texts:
+                        max_sim = max(_jaccard_sim(mem_text, t) for t in selected_texts)
+                    else:
+                        max_sim = 0.0
+                    val = lambda_div * rel - (1.0 - lambda_div) * max_sim
+                    if val > best_val:
+                        best_val = val
+                        best_item = item
+                if best_item is None:
+                    break
+                selected.append(best_item)
+                selected_texts.append(best_item.get("memory", ""))
+                remaining.remove(best_item)
+            return selected
+
+        _MONTH_ALIAS = {
+            "jan": 1,
+            "january": 1,
+            "feb": 2,
+            "february": 2,
+            "mar": 3,
+            "march": 3,
+            "apr": 4,
+            "april": 4,
+            "may": 5,
+            "jun": 6,
+            "june": 6,
+            "jul": 7,
+            "july": 7,
+            "aug": 8,
+            "august": 8,
+            "sep": 9,
+            "sept": 9,
+            "september": 9,
+            "oct": 10,
+            "october": 10,
+            "nov": 11,
+            "november": 11,
+            "dec": 12,
+            "december": 12,
+        }
+        _CN_MONTH_WORDS = {
+            "一月": 1,
+            "二月": 2,
+            "三月": 3,
+            "四月": 4,
+            "五月": 5,
+            "六月": 6,
+            "七月": 7,
+            "八月": 8,
+            "九月": 9,
+            "十月": 10,
+            "十一月": 11,
+            "十二月": 12,
+        }
+
+        def _extract_time_number_markers(text):
+            markers = set()
+            if not text:
+                return markers
+            lower_text = text.lower()
+
+            def _add_num(value):
+                try:
+                    num = int(value)
+                except (TypeError, ValueError):
+                    return
+                markers.add(f"NUM:{num}")
+
+            def _add_year(value):
+                try:
+                    year = int(value)
+                except (TypeError, ValueError):
+                    return
+                markers.add(f"YEAR:{year}")
+                _add_num(year)
+
+            def _add_month(value):
+                try:
+                    month = int(value)
+                except (TypeError, ValueError):
+                    return
+                if 1 <= month <= 12:
+                    markers.add(f"MONTH:{month}")
+
+            def _add_year_month(year, month):
+                try:
+                    y = int(year)
+                    m = int(month)
+                except (TypeError, ValueError):
+                    return
+                if 1 <= m <= 12:
+                    markers.add(f"YM:{y}-{m:02d}")
+                    _add_year(y)
+                    _add_month(m)
+
+            for raw in re.findall(r"\b\d{1,4}\b", text):
+                _add_num(raw)
+                if len(raw) == 4 and raw.startswith("20"):
+                    _add_year(raw)
+
+            for match in re.finditer(r"\b(20\d{2})[-/.](\d{1,2})(?:[-/.]\d{1,2})?\b", text):
+                _add_year_month(match.group(1), match.group(2))
+            for match in re.finditer(r"\b(\d{1,2})[/-](20\d{2})\b", text):
+                _add_year_month(match.group(2), match.group(1))
+            for match in re.finditer(r"(20\d{2})年(\d{1,2})月", text):
+                _add_year_month(match.group(1), match.group(2))
+            for match in re.finditer(r"(\d{1,2})月(20\d{2})年?", text):
+                _add_year_month(match.group(2), match.group(1))
+            for match in re.finditer(r"(20\d{2})年", text):
+                _add_year(match.group(1))
+            for match in re.finditer(r"(\d{1,2})月", text):
+                _add_month(match.group(1))
+
+            for alias, month_idx in _MONTH_ALIAS.items():
+                pattern = r"\b" + re.escape(alias) + r"\b"
+                if re.search(pattern, lower_text):
+                    _add_month(month_idx)
+                combo_pattern = pattern + r"\s+(20\d{2})\b"
+                for year in re.findall(combo_pattern, lower_text):
+                    _add_year_month(year, month_idx)
+            for word, month_idx in _CN_MONTH_WORDS.items():
+                if word in text:
+                    _add_month(month_idx)
+
+            for match in re.finditer(
+                r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+                lower_text,
+            ):
+                token = match.group(1)
+                base = token[:3]
+                if base == "sep":
+                    month_idx = 9
+                else:
+                    month_idx = _MONTH_ALIAS.get(base, _MONTHS.get(token, None))
+                if month_idx:
+                    _add_month(month_idx)
+            for match in re.finditer(
+                r"\b(20\d{2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+                lower_text,
+            ):
+                year = match.group(1)
+                token = match.group(2)
+                base = token[:3]
+                if base == "sep":
+                    month_idx = 9
+                else:
+                    month_idx = _MONTH_ALIAS.get(base, _MONTHS.get(token, None))
+                if month_idx:
+                    _add_year_month(year, month_idx)
+
+            return markers
+
+        def _has_structured_tokens(markers):
+            return any(token.startswith(STRUCTURED_MARKER_PREFIXES) for token in markers)
+
+        question_markers = _extract_time_number_markers(question)
+
+        def _extract_timestamp_seconds(item):
+            if not item:
+                return 0.0
+            ts_epoch = item.get("timestamp_epoch")
+            if ts_epoch is not None:
+                try:
+                    return float(ts_epoch)
+                except Exception:
+                    pass
+            ts_value = item.get("timestamp")
+            if ts_value is None:
+                return 0.0
+            try:
+                return float(ts_value)
+            except Exception:
+                pass
+            try:
+                parsed = datetime.fromisoformat(str(ts_value).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.timestamp()
+            except Exception:
+                return 0.0
+
+        def _recency_score(ts, now_ts, half_life_days=7.0):
+            if ts <= 0 or now_ts <= 0:
+                return 0.0
+            delta_days = max(0.0, (now_ts - ts) / 86400.0)
+            return math.exp(-math.log(2.0) * (delta_days / max(1e-6, half_life_days)))
+
+        def _add_to_map(dst_map, item):
+            key = item.get("memory")
+            if not key:
+                return
+            if key not in dst_map or float(item.get("score", 0.0)) > float(dst_map[key].get("score", 0.0)):
+                dst_map[key] = item
+
+        def _search(uid, q):
+            memories, graph_memories, duration = self.search_memory(uid, q)
+            return uid, memories, graph_memories, duration
+
+        keywords = []
+        kw_model = self._ensure_keybert_model()
+        if kw_model is not None:
+            try:
+                extracted = kw_model.extract_keywords(
+                    question,
+                    keyphrase_ngram_range=(1, 3),
+                    stop_words="english",
+                    top_n=MAX_KEYWORDS,
+                    use_mmr=True,
+                    diversity=0.7,
+                )
+                keywords = [kw[0] for kw in extracted]
+            except Exception as e:
+                print(f"⚠️ KeyBERT extraction failed: {e}. Using fallback.")
+
+        if not keywords:
+            stop_words = {
+                "what",
+                "when",
+                "where",
+                "who",
+                "why",
+                "how",
+                "is",
+                "are",
+                "was",
+                "were",
+                "the",
+                "a",
+                "an",
+                "and",
+                "or",
+                "but",
+                "in",
+                "on",
+                "at",
+                "to",
+                "for",
+            }
+            words = re.findall(r"\b\w+\b", question.lower())
+            keywords = [w for w in words if w not in stop_words and len(w) > 2][:MAX_KEYWORDS]
+
+        base_queries = [question]
+        base_queries.extend(keywords)
+
+        a_map = {}
+        b_map = {}
+        search_time_by_user = {speaker_1_user_id: 0.0, speaker_2_user_id: 0.0}
+
+        with self._thread_pool(MAX_WORKERS, "mem-search-base") as executor:
+            futures = []
+            for q in base_queries:
+                futures.append(executor.submit(_search, speaker_1_user_id, q))
+                futures.append(executor.submit(_search, speaker_2_user_id, q))
+            for f in as_completed(futures):
+                uid, mems, graph_mems, duration = f.result()
+                search_time_by_user[uid] = search_time_by_user.get(uid, 0.0) + float(duration or 0.0)
+                for m in mems:
+                    if uid == speaker_1_user_id:
+                        _add_to_map(a_map, m)
+                    else:
+                        _add_to_map(b_map, m)
+
+        global_pool = list(a_map.values()) + list(b_map.values())
+        global_pool_sorted = sorted(global_pool, key=lambda x: float(x.get("score", 0.0)), reverse=True)
+        prf_docs = global_pool_sorted[: min(PRF_K, len(global_pool_sorted))]
+
+        prf_text = " \n".join(m.get("memory", "") for m in prf_docs)
+        prf_terms = []
+        if kw_model is not None and prf_text:
+            try:
+                extracted = kw_model.extract_keywords(
+                    prf_text,
+                    keyphrase_ngram_range=(1, 3),
+                    stop_words="english",
+                    top_n=PRF_KEYWORDS,
+                    use_mmr=True,
+                    diversity=0.7,
+                )
+                prf_terms = [kw[0] for kw in extracted]
+            except Exception as e:
+                print(f"⚠️ PRF KeyBERT failed: {e}. Using fallback.")
+
+        if not prf_terms:
+            prf_terms = [t for t in _safe_lower_tokens(prf_text) if len(t) > 2][:PRF_KEYWORDS]
+
+        prf_queries = []
+        if prf_terms:
+            prf_queries.append(" ".join([str(term) for term in prf_terms[:3]]))
+        if len(prf_terms) >= 4:
+            prf_queries.append(" ".join([str(term) for term in prf_terms[2:6]]))
+
+        if prf_queries:
+            with self._thread_pool(MAX_WORKERS, "mem-search-prf") as executor:
+                futures = []
+                for q in prf_queries:
+                    futures.append(executor.submit(_search, speaker_1_user_id, q))
+                    futures.append(executor.submit(_search, speaker_2_user_id, q))
+                for f in as_completed(futures):
+                    uid, mems, graph_mems, duration = f.result()
+                    search_time_by_user[uid] = search_time_by_user.get(uid, 0.0) + float(duration or 0.0)
+                    for m in mems:
+                        if uid == speaker_1_user_id:
+                            _add_to_map(a_map, m)
+                        else:
+                            _add_to_map(b_map, m)
+
+        reranker = self._ensure_reranker_model()
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
+        subjects = intent.get("subjects") or []
+
+        def _score_after_rerank(cands):
+            if not cands:
+                return [], {}
+            base_scores = [float(m.get("score", 0.0)) for m in cands]
+            rerank_scores = self._ce_predict_cached(question, cands)
+            if rerank_scores is None and reranker is not None:
+                try:
+                    pairs = [[question, m.get("memory", "")] for m in cands]
+                    rerank_scores = reranker.predict(pairs, show_progress_bar=False)
+                except Exception as e:
+                    print(f"⚠️ Reranking failed: {e}. Fallback to base score.")
+                    rerank_scores = None
+
+            final_scores = {}
+            for i, m in enumerate(cands):
+                mem_text = m.get("memory", "")
+                rr = float(rerank_scores[i]) if rerank_scores is not None else base_scores[i]
+                ts = _extract_timestamp_seconds(m)
+                rec = _recency_score(ts, now_ts, half_life_days=HALF_LIFE_DAYS)
+                final_val = RERANK_WEIGHT * rr + RECENCY_WEIGHT * rec
+
+                mem_markers = _extract_time_number_markers(mem_text)
+                overlap = question_markers & mem_markers
+                if question_markers and overlap:
+                    frac = len(overlap) / max(1, len(question_markers))
+                    boost = BOOST_ALPHA * min(1.0, 0.5 + frac)
+                    final_val += boost
+                    m["marker_boost"] = boost
+
+                if NOISE_PENALTY < 0.0 and self._is_noise_text(mem_text):
+                    penalty = NOISE_PENALTY
+                    has_structured = _has_structured_tokens(mem_markers)
+                    if not has_structured:
+                        has_structured = bool(self._extract_candidate_names(mem_text))
+                    if has_structured:
+                        penalty = max(penalty, 0.0)
+                    final_val += penalty
+                    m["noise_penalty"] = penalty
+
+                sb = self._subject_bonus(mem_text, subjects)
+                ab = self._action_bonus(question, mem_text)
+                final_val += 0.12 * sb + 0.15 * ab
+
+                time_hit = self._time_bonus(question, mem_text)
+                final_val += 0.30 * time_hit
+                if intent.get("is_time"):
+                    y, mn, dd = self._extract_norm_date_from_memory(mem_text)
+                    if not (y or mn or dd):
+                        final_val -= 0.15
+
+                lx = self._lexical_score(question, mem_text)
+                final_val += 0.05 * math.log1p(max(0.0, lx))
+
+                final_scores[mem_text] = final_val
+                m["rerank_score"] = rr
+                m["final_score"] = final_val
+
+            sorted_items = sorted(cands, key=lambda x: x.get("final_score", 0.0), reverse=True)
+            return sorted_items, final_scores
+
+        a_candidates, b_candidates = list(a_map.values()), list(b_map.values())
+        rerank_executor = self._get_rerank_executor()
+        future_a = rerank_executor.submit(_score_after_rerank, a_candidates)
+        future_b = rerank_executor.submit(_score_after_rerank, b_candidates)
+        a_sorted, a_scores = future_a.result()
+        b_sorted, b_scores = future_b.result()
+
+        a_top = _mmr_select(a_sorted, a_scores, k=top_k, lambda_div=LAMBDA_DIV) if a_sorted else []
+        b_top = _mmr_select(b_sorted, b_scores, k=top_k, lambda_div=LAMBDA_DIV) if b_sorted else []
+
+        search_1_memory = [self._format_memory_line(m) for m in a_top]
+        search_2_memory = [self._format_memory_line(m) for m in b_top]
+        speaker_1_time = search_time_by_user.get(speaker_1_user_id, 0.0)
+        speaker_2_time = search_time_by_user.get(speaker_2_user_id, 0.0)
+        return search_1_memory, search_2_memory, speaker_1_time, speaker_2_time
 
     # ==== 方案 145：噪声感知混合检索 ====
     def _search_145(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
@@ -2244,6 +2720,9 @@ class MemorySearch:
                 speaker_1_time,
                 speaker_2_time,
             )
+        elif search_method == "14.10":
+            s1, s2, t1, t2 = self._search_1410(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
+            return (s1, s2, None, None, t1, t2)
         elif search_method == "6":
             if not len(self.speaker_1_full_memories) or not len(self.speaker_2_full_memories):
                 self.__load_full_memories(speaker_1_user_id, speaker_2_user_id)
