@@ -1798,17 +1798,21 @@ class MemorySearch:
                 search_time_by_user.get(speaker_2_user_id, 0.0),
             )
            
-        elif search_method == "5":
+        elif search_method in {"5", "14.9"}:
             # ========== 方法5: PRF + 关键词提取 + Reranking + MMR多样化 ==========
             # 配置参数
+            safe_enhanced = search_method == "14.9"
             PRF_K = 20  # PRF使用的文档数
             MAX_KEYWORDS = 5  # 基础关键词数量
             PRF_KEYWORDS = 6  # PRF关键词数量
             MAX_WORKERS = min(3, self._max_parallelism_cap)  # 并发线程数
-            LAMBDA_DIV = 0.6  # MMR多样性参数
+            LAMBDA_DIV = 0.8 if safe_enhanced else 0.6  # MMR多样性参数
             RERANK_WEIGHT = 0.8  # 重排序分数权重
             RECENCY_WEIGHT = 0.2  # 时间衰减权重
             HALF_LIFE_DAYS = 7.0  # 时间衰减半衰期（天）
+            BOOST_ALPHA = 0.3 if safe_enhanced else 0.0  # 数字/日期匹配额外加分
+            NOISE_PENALTY = -0.2 if safe_enhanced else 0.0  # 噪声轻扣分
+            STRUCTURED_MARKER_PREFIXES = ("NUM:", "YEAR:", "MONTH:", "YM:")
 
             # ---------- 工具函数（仅在此函数作用域内） ----------
             def _safe_lower_tokens(text):
@@ -1859,6 +1863,149 @@ class MemorySearch:
                     selected_texts.append(best_item.get("memory", ""))
                     remaining.remove(best_item)
                 return selected
+
+            _MONTH_ALIAS = {
+                "jan": 1,
+                "january": 1,
+                "feb": 2,
+                "february": 2,
+                "mar": 3,
+                "march": 3,
+                "apr": 4,
+                "april": 4,
+                "may": 5,
+                "jun": 6,
+                "june": 6,
+                "jul": 7,
+                "july": 7,
+                "aug": 8,
+                "august": 8,
+                "sep": 9,
+                "sept": 9,
+                "september": 9,
+                "oct": 10,
+                "october": 10,
+                "nov": 11,
+                "november": 11,
+                "dec": 12,
+                "december": 12,
+            }
+            _CN_MONTH_WORDS = {
+                "一月": 1,
+                "二月": 2,
+                "三月": 3,
+                "四月": 4,
+                "五月": 5,
+                "六月": 6,
+                "七月": 7,
+                "八月": 8,
+                "九月": 9,
+                "十月": 10,
+                "十一月": 11,
+                "十二月": 12,
+            }
+
+            def _extract_time_number_markers(text):
+                markers = set()
+                if not text:
+                    return markers
+                lower_text = text.lower()
+
+                def _add_num(value):
+                    try:
+                        num = int(value)
+                    except (TypeError, ValueError):
+                        return
+                    markers.add(f"NUM:{num}")
+
+                def _add_year(value):
+                    try:
+                        year = int(value)
+                    except (TypeError, ValueError):
+                        return
+                    markers.add(f"YEAR:{year}")
+                    _add_num(year)
+
+                def _add_month(value):
+                    try:
+                        month = int(value)
+                    except (TypeError, ValueError):
+                        return
+                    if 1 <= month <= 12:
+                        markers.add(f"MONTH:{month}")
+
+                def _add_year_month(year, month):
+                    try:
+                        y = int(year)
+                        m = int(month)
+                    except (TypeError, ValueError):
+                        return
+                    if 1 <= m <= 12:
+                        markers.add(f"YM:{y}-{m:02d}")
+                        _add_year(y)
+                        _add_month(m)
+
+                for raw in re.findall(r"\b\d{1,4}\b", text):
+                    _add_num(raw)
+                    if len(raw) == 4 and raw.startswith("20"):
+                        _add_year(raw)
+
+                for match in re.finditer(r"\b(20\d{2})[-/.](\d{1,2})(?:[-/.]\d{1,2})?\b", text):
+                    _add_year_month(match.group(1), match.group(2))
+                for match in re.finditer(r"\b(\d{1,2})[/-](20\d{2})\b", text):
+                    _add_year_month(match.group(2), match.group(1))
+                for match in re.finditer(r"(20\d{2})年(\d{1,2})月", text):
+                    _add_year_month(match.group(1), match.group(2))
+                for match in re.finditer(r"(\d{1,2})月(20\d{2})年?", text):
+                    _add_year_month(match.group(2), match.group(1))
+                for match in re.finditer(r"(20\d{2})年", text):
+                    _add_year(match.group(1))
+                for match in re.finditer(r"(\d{1,2})月", text):
+                    _add_month(match.group(1))
+
+                for alias, month_idx in _MONTH_ALIAS.items():
+                    pattern = r"\b" + re.escape(alias) + r"\b"
+                    if re.search(pattern, lower_text):
+                        _add_month(month_idx)
+                    combo_pattern = pattern + r"\s+(20\d{2})\b"
+                    for year in re.findall(combo_pattern, lower_text):
+                        _add_year_month(year, month_idx)
+                for word, month_idx in _CN_MONTH_WORDS.items():
+                    if word in text:
+                        _add_month(month_idx)
+
+                for match in re.finditer(
+                    r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+                    lower_text,
+                ):
+                    token = match.group(1)
+                    base = token[:3]
+                    if base == "sep":
+                        month_idx = 9
+                    else:
+                        month_idx = _MONTH_ALIAS.get(base, _MONTHS.get(token, None))
+                    if month_idx:
+                        _add_month(month_idx)
+                for match in re.finditer(
+                    r"\b(20\d{2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+                    lower_text,
+                ):
+                    year = match.group(1)
+                    token = match.group(2)
+                    base = token[:3]
+                    if base == "sep":
+                        month_idx = 9
+                    else:
+                        month_idx = _MONTH_ALIAS.get(base, _MONTHS.get(token, None))
+                    if month_idx:
+                        _add_year_month(year, month_idx)
+
+                return markers
+
+            def _has_structured_tokens(markers):
+                return any(token.startswith(STRUCTURED_MARKER_PREFIXES) for token in markers)
+
+            question_markers = _extract_time_number_markers(question) if safe_enhanced else set()
 
             def _extract_timestamp_seconds(item):
                 """
@@ -2051,9 +2198,24 @@ class MemorySearch:
                     rr = float(rerank_scores[i]) if rerank_scores is not None else base_scores[i]
                     ts = _extract_timestamp_seconds(m)
                     rec = _recency_score(ts, now_ts, half_life_days=HALF_LIFE_DAYS)
-                    final_scores[mem_text] = RERANK_WEIGHT * rr + RECENCY_WEIGHT * rec
+                    final_val = RERANK_WEIGHT * rr + RECENCY_WEIGHT * rec
+                    if safe_enhanced:
+                        mem_markers = _extract_time_number_markers(mem_text)
+                        if question_markers and (question_markers & mem_markers):
+                            final_val += BOOST_ALPHA
+                            m["marker_boost"] = BOOST_ALPHA
+                        if NOISE_PENALTY < 0.0 and self._is_noise_text(mem_text):
+                            penalty = NOISE_PENALTY
+                            has_structured = _has_structured_tokens(mem_markers)
+                            if not has_structured:
+                                has_structured = bool(self._extract_candidate_names(mem_text))
+                            if has_structured:
+                                penalty = max(penalty, 0.0)
+                            final_val += penalty
+                            m["noise_penalty"] = penalty
+                    final_scores[mem_text] = final_val
                     m["rerank_score"] = rr
-                    m["final_score"] = final_scores[mem_text]
+                    m["final_score"] = final_val
                 return sorted(cands, key=lambda x: x.get("final_score", 0.0), reverse=True), final_scores
                 
 
