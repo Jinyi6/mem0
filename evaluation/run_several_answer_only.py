@@ -15,7 +15,6 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
@@ -59,6 +58,18 @@ os.environ.setdefault("MEM0_TELEMETRY", "False")
 def _sanitize_model_tag(model_name: str) -> str:
     clean = re.sub(r"[^0-9a-zA-Z_]+", "_", model_name or "answer").strip("_")
     return clean or "answer"
+
+
+def _extract_time_tag(path: Path) -> str:
+    """
+    Try to reuse the timestamp segment embedded in the original filename.
+    Fallback to the entire stem when no timestamp is found.
+    """
+    stem = path.stem
+    match = re.search(r"(\d{8}_\d{6}.*)$", stem)
+    if match:
+        return match.group(1)
+    return stem
 
 
 def _resolve_path(path_str: str) -> Path:
@@ -134,11 +145,11 @@ def _iter_questions(payload: Dict[str, List[Dict]]) -> Iterable[Tuple[str, int, 
 def _run_evaluation(
     answer_file: Path,
     model_tag: str,
+    time_tag: str,
     evaluator_config: Dict[str, str],
     max_workers: int,
 ) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    metrics_path = answer_file.with_name(f"evaluation_metrics_{model_tag}_{timestamp}.json")
+    metrics_path = answer_file.with_name(f"evaluation_metrics_{time_tag}_{model_tag}.json")
     cmd = [
         sys.executable,
         str(EVAL_SCRIPT_PATH),
@@ -171,7 +182,7 @@ def _answer_experiment(
     answer_client: OpenAI,
     model_name: str,
     max_workers: int,
-) -> Tuple[Path, Dict[str, int]]:
+) -> Tuple[Path, Dict[str, int], str]:
     with input_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
 
@@ -192,6 +203,7 @@ def _answer_experiment(
 
     model_tag = _sanitize_model_tag(model_name)
     answer_output = input_path.with_name(f"{input_path.stem}_{model_tag}_answer{input_path.suffix}")
+    time_tag = _extract_time_tag(input_path)
 
     stats = {"completed": 0, "failed": 0, "skipped": total_entries - len(tasks)}
 
@@ -224,7 +236,7 @@ def _answer_experiment(
         json.dump(payload, handle, indent=4, ensure_ascii=False)
 
     print(f"✅ Answer-only file written to: {answer_output}")
-    return answer_output, stats
+    return answer_output, stats, time_tag
 
 
 def parse_args() -> argparse.Namespace:
@@ -261,7 +273,7 @@ def main() -> None:
         print("=" * 80)
 
         try:
-            answer_file, stats = _answer_experiment(
+            answer_file, stats, time_tag = _answer_experiment(
                 input_path=input_path,
                 answer_client=answer_client,
                 model_name=answer_model,
@@ -276,6 +288,7 @@ def main() -> None:
             metrics_path = _run_evaluation(
                 answer_file=answer_file,
                 model_tag=_sanitize_model_tag(answer_model),
+                time_tag=time_tag,
                 evaluator_config=EVALUATOR_LLM_CONFIG,
                 max_workers=args.eval_max_workers,
             )
