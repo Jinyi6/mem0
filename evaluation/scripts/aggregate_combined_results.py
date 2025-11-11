@@ -3,14 +3,26 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+# Exactly one of DIRECTORY_TO_ANALYZE or COMBINED_JSON_FILES should be set.
+# Example: DIRECTORY_TO_ANALYZE = Path("/path/to/eval/runs")
+DIRECTORY_TO_ANALYZE: Optional[Path] = None
+
+# Example: COMBINED_JSON_FILES = [Path("run_a.json"), Path("run_b.json")]
+COMBINED_JSON_FILES: List[Path] = []
+
+# Defaults to DIRECTORY_TO_ANALYZE (or the first file's parent when using a list).
+OUTPUT_DIRECTORY: Optional[Path] = None
+
+# Base filename for the summary. A timestamp and .json extension will be appended.
+OUTPUT_BASENAME = "evaluation_metrics_differences_summary"
 
 COMBINED_PATTERN = re.compile(
     r"evaluation_metrics_(?P<timestamp>\d{8}_\d{6})_combined\.json$"
@@ -110,19 +122,26 @@ def resolve_method_info(directory: Path, combined_path: Path) -> MethodInfo:
     )
 
 
-def aggregate_directory(directory: Path) -> Dict[str, object]:
-    """Aggregate combined files within a directory."""
-    combined_files = sorted(directory.glob("evaluation_metrics_*_combined.json"))
+def aggregate_combined_files(
+    combined_files: Iterable[Path], source_label: str
+) -> Dict[str, object]:
+    """Aggregate one or more combined JSON files."""
     question_metadata: Dict[str, dict] = {}
     question_methods: Dict[str, Dict[str, dict]] = {}
     method_details: Dict[str, dict] = {}
+    processed_files = 0
 
     for combined_path in combined_files:
+        if not combined_path.exists():
+            print(f"[WARN] Combined file not found: {combined_path}", file=sys.stderr)
+            continue
+
         entries = load_combined_entries(combined_path)
         if not entries:
             continue
 
-        method_info = resolve_method_info(directory, combined_path)
+        processed_files += 1
+        method_info = resolve_method_info(combined_path.parent, combined_path)
         method_id = method_info.method_id
         method_details.setdefault(
             method_id,
@@ -201,7 +220,8 @@ def aggregate_directory(directory: Path) -> Dict[str, object]:
         )
 
     summary = {
-        "source_directory": str(directory),
+        "source": source_label,
+        "files_processed": processed_files,
         "total_questions": len(question_methods),
         "all_correct_count": all_correct,
         "all_wrong_count": all_wrong,
@@ -213,55 +233,89 @@ def aggregate_directory(directory: Path) -> Dict[str, object]:
     return summary
 
 
-def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Merge evaluation *_combined.json files within one or more directories "
-            "and retain only questions whose outcomes differ across methods."
-        )
-    )
-    parser.add_argument(
-        "directories",
-        nargs="+",
-        type=Path,
-        help="Directories that contain evaluation_metrics_*_combined.json files.",
-    )
-    parser.add_argument(
-        "--output-name",
-        default="evaluation_metrics_differences_summary.json",
-        help="Filename (within each directory) to write the aggregated summary.",
-    )
-    return parser.parse_args(argv)
+def normalize_path(path: Path) -> Path:
+    """Expand user/home references and return an absolute Path."""
+    return Path(path).expanduser().resolve()
 
 
-def main(argv: Optional[Iterable[str]] = None) -> int:
-    args = parse_args(argv)
-    exit_code = 0
+def derive_output_filename(base_name: str, timestamp: str) -> str:
+    """Append a timestamp and ensure the filename ends with .json."""
+    sanitized = base_name.strip()
+    if sanitized.lower().endswith(".json"):
+        sanitized = sanitized[: -len(".json")]
+    if not sanitized:
+        sanitized = "evaluation_metrics_differences_summary"
+    return f"{sanitized}_{timestamp}.json"
 
-    for directory in args.directories:
+
+def build_output_path(
+    output_dir: Optional[Path], fallback_dir: Path, base_name: str, timestamp: str
+) -> Path:
+    """Select the directory for the summary and ensure it exists."""
+    target_dir = normalize_path(output_dir) if output_dir else normalize_path(fallback_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = derive_output_filename(base_name, timestamp)
+    return target_dir / filename
+
+
+def resolve_combined_sources() -> Tuple[List[Path], str, Path]:
+    """Determine which combined files to analyze based on the configuration."""
+    if DIRECTORY_TO_ANALYZE and COMBINED_JSON_FILES:
+        raise ValueError("Configure either DIRECTORY_TO_ANALYZE or COMBINED_JSON_FILES, not both.")
+
+    if DIRECTORY_TO_ANALYZE:
+        directory = normalize_path(DIRECTORY_TO_ANALYZE)
         if not directory.exists():
-            print(f"[WARN] Directory not found: {directory}", file=sys.stderr)
-            exit_code = 1
-            continue
+            raise ValueError(f"Directory not found: {directory}")
         if not directory.is_dir():
-            print(f"[WARN] Not a directory: {directory}", file=sys.stderr)
-            exit_code = 1
-            continue
+            raise ValueError(f"Not a directory: {directory}")
+        combined_files = sorted(directory.glob("evaluation_metrics_*_combined.json"))
+        if not combined_files:
+            raise ValueError(f"No combined JSON files found under {directory}")
+        return combined_files, str(directory), directory
 
-        summary = aggregate_directory(directory)
-        output_path = directory / args.output_name
-        with output_path.open("w", encoding="utf-8") as handle:
-            json.dump(summary, handle, indent=2)
-            handle.write("\n")
+    if COMBINED_JSON_FILES:
+        normalized_files: List[Path] = []
+        for combined_file in COMBINED_JSON_FILES:
+            normalized = normalize_path(combined_file)
+            if not normalized.exists():
+                print(f"[WARN] Combined file not found: {normalized}", file=sys.stderr)
+                continue
+            if not normalized.is_file():
+                print(f"[WARN] Not a file: {normalized}", file=sys.stderr)
+                continue
+            normalized_files.append(normalized)
+        if not normalized_files:
+            raise ValueError("No valid combined JSON files to analyze.")
+        return normalized_files, f"explicit-file-list ({len(normalized_files)} files)", normalized_files[0].parent
 
-        print(
-            f"[{directory}] differing: {summary['differing_question_count']}, "
-            f"all-correct: {summary['all_correct_count']}, "
-            f"all-wrong: {summary['all_wrong_count']}"
-        )
-        print(f"  wrote: {output_path}")
+    raise ValueError("Please set DIRECTORY_TO_ANALYZE or COMBINED_JSON_FILES in this script.")
 
-    return exit_code
+
+def main() -> int:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    try:
+        combined_paths, source_label, default_output_dir = resolve_combined_sources()
+    except ValueError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
+
+    summary = aggregate_combined_files(combined_paths, source_label)
+    summary["generated_at"] = timestamp
+    output_path = build_output_path(OUTPUT_DIRECTORY, default_output_dir, OUTPUT_BASENAME, timestamp)
+
+    with output_path.open("w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2)
+        handle.write("\n")
+
+    print(
+        f"[Aggregation] differing: {summary['differing_question_count']}, "
+        f"all-correct: {summary['all_correct_count']}, "
+        f"all-wrong: {summary['all_wrong_count']}"
+    )
+    print(f"  processed files: {summary['files_processed']}")
+    print(f"  wrote summary: {output_path}")
+    return 0
 
 
 if __name__ == "__main__":
