@@ -213,12 +213,24 @@ def aggregate_combined_files(
                 continue
 
         metadata = question_metadata.get(question, {"question": question})
+        correct_methods = [
+            method_id
+            for method_id, details in methods.items()
+            if details.get("llm_score") == 1
+        ]
+        wrong_methods = [
+            method_id
+            for method_id, details in methods.items()
+            if details.get("llm_score") == 0
+        ]
         differing_questions.append(
             {
                 "question": metadata.get("question"),
                 "answer": metadata.get("answer"),
                 "category": metadata.get("category"),
                 "answer_fixed": metadata.get("answer_fixed"),
+                "correct": correct_methods,
+                "wrong": wrong_methods,
                 "methods": methods,
             }
         )
