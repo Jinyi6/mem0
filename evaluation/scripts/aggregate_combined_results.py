@@ -130,6 +130,7 @@ def aggregate_combined_files(
     question_methods: Dict[str, Dict[str, dict]] = {}
     method_details: Dict[str, dict] = {}
     processed_files = 0
+    method_occurrences: Dict[str, int] = {}
 
     for combined_path in combined_files:
         if not combined_path.exists():
@@ -142,7 +143,10 @@ def aggregate_combined_files(
 
         processed_files += 1
         method_info = resolve_method_info(combined_path.parent, combined_path)
-        method_id = method_info.method_id
+        base_method_id = method_info.method_id
+        occurrence = method_occurrences.get(base_method_id, 0) + 1
+        method_occurrences[base_method_id] = occurrence
+        method_id = f"{base_method_id}_{occurrence}"
         method_details.setdefault(
             method_id,
             {
