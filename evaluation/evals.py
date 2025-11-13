@@ -221,6 +221,8 @@ def process_single_item(
     pred_answer = str(item["response"])
     if "Final Answer:" in pred_answer:
         pred_answer = pred_answer.split("Final Answer:", 1)[1].strip()
+    if "</think>" in pred_answer:
+        pred_answer = pred_answer.split("</think>", 1)[1].strip()
 
     category = str(item["category"])
     question = str(item["question"])
