@@ -283,34 +283,56 @@ def main():
     if evaluator_model:
         os.environ["EVALUATOR_MODEL"] = evaluator_model
 
-    # 2. Setup Experiment Workspace based on start_from_step
+    run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    llm_model_tag = sanitize_collection_name(add_llm_model)
+    planned_exp_name = (
+        f"{dataset_name}_"
+        f"model_{llm_model_tag}_"
+        f"top_k_{top_k_str}_"
+        f"filter_{filter_memories_str}_"
+        f"graph_{is_graph_str}_"
+        f"{fact_extraction_mode_str}_"
+        f"{memory_decision_mode_str}_"
+        f"{search_mode_str}_"
+        f"{answer_mode_str}_"
+        f"{run_timestamp}"
+    )
+    proposed_workspace_dir = os.path.join(
+        setup_params['base_dir'], dataset_name, planned_exp_name
+    )
+
+    existing_workspace_dir = setup_params.get("existing_workspace_dir")
     workspace_dir = ""
+    state_workspace_dir = ""
     if args.start_from_step == 1:
-        # --- 行为和原来一致：创建新工作区 ---
         print("▶️ Starting from Step 1: A new workspace will be created.")
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        llm_model_tag = sanitize_collection_name(add_llm_model)
-        exp_name = (
-            f"{dataset_name}_"
-            f"model_{llm_model_tag}_"
-            f"top_k_{top_k_str}_"
-            f"filter_{filter_memories_str}_"
-            f"graph_{is_graph_str}_"
-            f"{fact_extraction_mode_str}_"
-            f"{memory_decision_mode_str}_"
-            f"{search_mode_str}_"
-            f"{answer_mode_str}_"
-            f"{timestamp}"
-        )
-        workspace_dir = os.path.join(setup_params['base_dir'], dataset_name, exp_name)
+        workspace_dir = proposed_workspace_dir
+        state_workspace_dir = workspace_dir
         os.makedirs(workspace_dir, exist_ok=True)
         print("="*80)
         print(f"📂 Created new experiment workspace at: {workspace_dir}")
         print("="*80)
+    elif args.start_from_step == 2:
+        print("▶️ Starting from Step 2: Preparing a new workspace for this run.")
+        if not existing_workspace_dir or not os.path.isdir(existing_workspace_dir):
+            raise ValueError(
+                f"❌ Error: When starting from step {args.start_from_step}, "
+                f"the 'existing_workspace_dir' must be specified in '{args.config}' "
+                "and it must be a valid directory."
+            )
+        workspace_dir = proposed_workspace_dir
+        state_workspace_dir = existing_workspace_dir
+        os.makedirs(workspace_dir, exist_ok=True)
+        with open(os.path.join(workspace_dir, "state_source.txt"), "w", encoding="utf-8") as marker:
+            marker.write(existing_workspace_dir)
+        print("="*80)
+        print(f"📂 Created new output workspace at: {workspace_dir}")
+        print(f"♻️  Reusing memories from: {existing_workspace_dir}")
+        print("="*80)
     else:
-        # --- 新行为：使用已有的工作区 ---
         print(f"▶️ Starting from Step {args.start_from_step}: Using an existing workspace.")
-        workspace_dir = setup_params.get("existing_workspace_dir")
+        workspace_dir = existing_workspace_dir
+        state_workspace_dir = existing_workspace_dir
         if not workspace_dir or not os.path.isdir(workspace_dir):
             raise ValueError(
                 f"❌ Error: When starting from step {args.start_from_step}, "
@@ -325,16 +347,15 @@ def main():
     # save_git_state(workspace_dir)
 
     # 3. Define all file paths within the workspace
-    qdrant_path = os.path.join(workspace_dir, "qdrant_data")
+    qdrant_path = os.path.join(state_workspace_dir, "qdrant_data")
     os.makedirs(qdrant_path, exist_ok=True)
-    collection_name = sanitize_collection_name(Path(workspace_dir).name)
-    mem0_state_dir = os.path.join(workspace_dir, ".mem0_state")
+    collection_name = sanitize_collection_name(Path(state_workspace_dir).name)
+    mem0_state_dir = os.path.join(state_workspace_dir, ".mem0_state")
     os.makedirs(mem0_state_dir, exist_ok=True)
     os.environ["MEM0_DIR"] = mem0_state_dir
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     if technique_type == "full_context":
         search_results_raw_filename = f"full_context_{dataset_name}_results.json"
-        search_results_filename = f"full_context_{dataset_name}_results_{timestamp}.json"
+        search_results_filename = f"full_context_{dataset_name}_results_{run_timestamp}.json"
     else:
         search_results_raw_filename = (
             f"mem0_{dataset_name}_results_top_{top_k_str}_"
@@ -343,12 +364,12 @@ def main():
         search_results_filename = (
             f"mem0_{dataset_name}_results_top_{top_k_str}_"
             f"filter_{filter_memories_str}_graph_{is_graph_str}_"
-            f"{timestamp}_{fact_extraction_mode_str}_{memory_decision_mode_str}_{search_mode_str}_{answer_mode_str}.json"
+            f"{run_timestamp}_{fact_extraction_mode_str}_{memory_decision_mode_str}_{search_mode_str}_{answer_mode_str}.json"
         )
-    shutil.copy(args.config, os.path.join(workspace_dir, f"config_{timestamp}.json"))
+    shutil.copy(args.config, os.path.join(workspace_dir, f"config_{run_timestamp}.json"))
     search_results_raw_path = os.path.join(workspace_dir, search_results_raw_filename)
     search_results_path = os.path.join(workspace_dir, search_results_filename)
-    eval_metrics_path = os.path.join(workspace_dir, f"evaluation_metrics_{timestamp}.json")
+    eval_metrics_path = os.path.join(workspace_dir, f"evaluation_metrics_{run_timestamp}.json")
     final_scores_path = os.path.join(workspace_dir, "final_scores.txt")
 
     # --- Execute Pipeline Steps Conditionally ---
