@@ -3188,6 +3188,69 @@ Q3: ..."""
         speaker_2_time = search_time_by_user.get(speaker_2_user_id, 0.0)
         return search_1_memory, search_2_memory, speaker_1_time, speaker_2_time
 
+    def _search_llm0(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        """
+        LLM 直排版本：直接让 LLM 在全量记忆中选择相关项。
+        失败自动重试；限流时随机等待 20~40 秒，其它异常立即重试。
+        """
+        def _llm_choose(memories):
+            if not memories:
+                return []
+            lines = [f"[{idx}] {self._format_memory_line(m)}" for idx, m in enumerate(memories)]
+            doc_block = "\n".join(lines[:400])  # 防止提示过长
+            prompt = f"""You are a precise retrieval assistant.
+Question: {question}
+Memories:
+{doc_block}
+
+Select up to {top_k} most relevant memory indices. Respond ONLY with indices in ascending order, separated by commas (e.g., 0,2,5)."""
+            empty_hits = 0
+            while True:
+                try:
+                    resp = self.search_client.chat.completions.create(
+                        model=self.llm_model,
+                        messages=[{"role": "system", "content": prompt}],
+                        temperature=0.0,
+                    )
+                    text = (resp.choices[0].message.content or "").strip()
+                    nums = re.findall(r"\d+", text)
+                    seen = set()
+                    idxs = []
+                    for n in nums:
+                        val = int(n)
+                        if 0 <= val < len(memories) and val not in seen:
+                            idxs.append(val)
+                            seen.add(val)
+                    if idxs:
+                        return [memories[i] for i in idxs[:top_k]]
+                    empty_hits += 1
+                    if empty_hits >= 50:
+                        break
+                except Exception as e:
+                    msg = str(e).lower()
+                    if "rate limit" in msg or "limit" in msg or "overloaded" in msg or "token" in msg:
+                        time.sleep(random.uniform(20, 40))
+                    continue
+            # fallback to lexical排序
+            memories_sorted = sorted(memories, key=lambda m: self._lexical_score(question, m.get("memory", "")), reverse=True)
+            return memories_sorted[:top_k]
+
+        # 拉取全量记忆
+        s1_start = time.perf_counter()
+        speaker_1_memories, _, s1_time = self.search_memory(speaker_1_user_id, "get all", limit=600)
+        s1_total = max(0.0, time.perf_counter() - s1_start) if s1_time is None else s1_time
+
+        s2_start = time.perf_counter()
+        speaker_2_memories, _, s2_time = self.search_memory(speaker_2_user_id, "get all", limit=600)
+        s2_total = max(0.0, time.perf_counter() - s2_start) if s2_time is None else s2_time
+
+        top1 = _llm_choose(speaker_1_memories)
+        top2 = _llm_choose(speaker_2_memories)
+
+        search_1_memory = [self._format_memory_line(m) for m in top1]
+        search_2_memory = [self._format_memory_line(m) for m in top2]
+        return search_1_memory, search_2_memory, s1_total, s2_total
+
     # ==== 方案 145：噪声感知混合检索 ====
     def _search_145(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
         # 1) 先用基础检索拿候选（沿用你已有的 search_memory + 关键词/子问扩展都可）
@@ -4341,6 +4404,9 @@ Q3: ..."""
                 speaker_1_time,
                 speaker_2_time,
             )
+        elif search_method == "llm0":
+            s1, s2, t1, t2 = self._search_llm0(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
+            return (s1, s2, None, None, t1, t2)
         elif search_method == "14.21":
             s1, s2, t1, t2 = self._search_1421(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
             return (s1, s2, None, None, t1, t2)
