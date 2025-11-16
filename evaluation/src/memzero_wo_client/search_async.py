@@ -1736,6 +1736,778 @@ class MemorySearch:
         speaker_2_time = search_time_by_user.get(speaker_2_user_id, 0.0)
         return search_1_memory, search_2_memory, speaker_1_time, speaker_2_time
 
+    def _search_1421(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        """
+        14.20 增强版：在原 recall/PRF/多视角基础上增加模式识别 + 置信度 gating 的软融合，
+        旨在避免“跷跷板”并提升通用性。
+        """
+        MAX_KEYWORDS = 8
+        MAX_FALLBACK_KEYWORDS = 8
+        MAX_KEYWORD_TOTAL = 10
+        PRF_K = 25
+        PRF_KEYWORDS = 8
+        MAX_MULTIHOP_QUERIES = 3
+        NEG_PENALTY = 0.45
+        STRUCTURED_MARKER_PREFIXES = ("NUM:", "YEAR:", "MONTH:", "YM:")
+        MAX_WORKERS = min(4, self._max_parallelism_cap)
+
+        # Gating + 融合控制
+        CONF_HIGH = 0.64
+        CONF_LOW = 0.32
+        DELTA_CLIP = 0.9
+        LAMBDA_BASE = 0.18
+        PROTECT_TOP = 1  # 高置信度下保护前 N
+
+        intent = self._intent_148(question)
+        if intent.get("is_time") and (intent.get("has_year") or intent.get("has_month")):
+            return self._search_147(speaker_1_user_id, speaker_2_user_id, question, top_k)
+        if intent.get("is_time") and not intent.get("want_recent"):
+            return self._search_146(speaker_1_user_id, speaker_2_user_id, question, top_k)
+
+        neg_terms, sanitized_question, neg_infos = self._extract_negative_terms(question)
+        neg_terms = {t for t in neg_terms if t}
+        neg_infos = neg_infos or []
+        question_for_keywords = sanitized_question or question
+
+        if intent.get("want_recent"):
+            recency_weight = 0.32
+            half_life_days = 3.0
+        elif intent.get("is_time"):
+            recency_weight = 0.24
+            half_life_days = 5.0
+        else:
+            recency_weight = 0.16
+            half_life_days = 10.0
+        rerank_weight = 0.66
+        lambda_div = 0.8 if intent.get("is_time") else 0.74
+
+        base_limit = max(self.top_k, 40)
+        keyword_limit = min(80, max(self.top_k * 2, base_limit))
+        phrase_limit = min(100, max(self.top_k * 3, keyword_limit))
+        followup_limit = min(120, max(self.top_k * 4, phrase_limit))
+
+        def _safe_lower_tokens(text):
+            try:
+                return re.findall(r"\b\w+\b", (text or "").lower())
+            except Exception:
+                return []
+
+        def _filtered_tokens(text):
+            toks = _safe_lower_tokens(text)
+            if not neg_terms:
+                return toks
+            return [t for t in toks if t not in neg_terms]
+
+        def _normalize_for_lex(text):
+            filtered = _filtered_tokens(text)
+            if filtered:
+                return " ".join(filtered)
+            return (text or "").strip()
+
+        def _extract_time_number_markers(text):
+            markers = set()
+            if not text:
+                return markers
+            lower_text = text.lower()
+
+            def _add_num(value):
+                try:
+                    num = int(value)
+                except (TypeError, ValueError):
+                    return
+                markers.add(f"NUM:{num}")
+
+            def _add_year(value):
+                try:
+                    year = int(value)
+                except (TypeError, ValueError):
+                    return
+                markers.add(f"YEAR:{year}")
+                _add_num(year)
+
+            def _add_month(value):
+                try:
+                    month = int(value)
+                except (TypeError, ValueError):
+                    return
+                if 1 <= month <= 12:
+                    markers.add(f"MONTH:{month:02d}")
+                    _add_num(month)
+
+            def _add_year_month(year, month):
+                try:
+                    y = int(year)
+                    m = int(month)
+                except (TypeError, ValueError):
+                    return
+                if 1 <= m <= 12:
+                    markers.add(f"YM:{y}-{m:02d}")
+                    _add_year(y)
+                    _add_month(m)
+
+            for raw in re.findall(r"\b\d{1,4}\b", text):
+                _add_num(raw)
+                if len(raw) == 4 and raw.startswith("20"):
+                    _add_year(raw)
+            for match in re.finditer(r"\b(20\d{2})[-/.](\d{1,2})(?:[-/.]\d{1,2})?\b", text):
+                _add_year_month(match.group(1), match.group(2))
+            for match in re.finditer(r"\b(\d{1,2})[/-](20\d{2})\b", text):
+                _add_year_month(match.group(2), match.group(1))
+            for match in re.finditer(r"(20\d{2})年(\d{1,2})月", text):
+                _add_year_month(match.group(1), match.group(2))
+            for match in re.finditer(r"(\d{1,2})月(20\d{2})年?", text):
+                _add_year_month(match.group(2), match.group(1))
+            for match in re.finditer(r"(20\d{2})年", text):
+                _add_year(match.group(1))
+            for match in re.finditer(r"(\d{1,2})月", text):
+                _add_month(match.group(1))
+            for alias, month_idx in {
+                "jan": 1,
+                "january": 1,
+                "feb": 2,
+                "february": 2,
+                "mar": 3,
+                "march": 3,
+                "apr": 4,
+                "april": 4,
+                "may": 5,
+                "jun": 6,
+                "june": 6,
+                "jul": 7,
+                "july": 7,
+                "aug": 8,
+                "august": 8,
+                "sep": 9,
+                "sept": 9,
+                "september": 9,
+                "oct": 10,
+                "october": 10,
+                "nov": 11,
+                "november": 11,
+                "dec": 12,
+                "december": 12,
+            }.items():
+                pattern = r"\b" + re.escape(alias) + r"\b"
+                if re.search(pattern, lower_text):
+                    _add_month(month_idx)
+                combo_pattern = pattern + r"\s+(20\d{2})\b"
+                for year in re.findall(combo_pattern, lower_text):
+                    _add_year_month(year, month_idx)
+            for match in re.finditer(
+                r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+                lower_text,
+            ):
+                token = match.group(1)
+                base = token[:3]
+                month_idx = 9 if base == "sep" else {
+                    "jan": 1,
+                    "feb": 2,
+                    "mar": 3,
+                    "apr": 4,
+                    "may": 5,
+                    "jun": 6,
+                    "jul": 7,
+                    "aug": 8,
+                    "oct": 10,
+                    "nov": 11,
+                    "dec": 12,
+                }.get(base, _MONTHS.get(token, None))
+                if month_idx:
+                    _add_month(month_idx)
+            for match in re.finditer(
+                r"\b(20\d{2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+                lower_text,
+            ):
+                year = match.group(1)
+                token = match.group(2)
+                base = token[:3]
+                month_idx = 9 if base == "sep" else {
+                    "jan": 1,
+                    "feb": 2,
+                    "mar": 3,
+                    "apr": 4,
+                    "may": 5,
+                    "jun": 6,
+                    "jul": 7,
+                    "aug": 8,
+                    "oct": 10,
+                    "nov": 11,
+                    "dec": 12,
+                }.get(base, _MONTHS.get(token, None))
+                if month_idx:
+                    _add_year_month(year, month_idx)
+            return markers
+
+        def _has_structured_tokens(markers):
+            return any(token.startswith(STRUCTURED_MARKER_PREFIXES) for token in markers)
+
+        question_markers = _extract_time_number_markers(question)
+
+        def _add_to_map(dst_map, item):
+            key = item.get("memory")
+            if not key:
+                return
+            existing = dst_map.get(key)
+            if existing is None or float(item.get("score", 0.0)) > float(existing.get("score", 0.0)):
+                dst_map[key] = item
+
+        def _search(uid, q, limit):
+            memories, _, duration = self.search_memory(uid, q, limit=limit)
+            return uid, memories, duration
+
+        kw_model = self._ensure_keybert_model()
+        keybert_terms = []
+        if kw_model is not None:
+            try:
+                extracted = kw_model.extract_keywords(
+                    question_for_keywords,
+                    keyphrase_ngram_range=(1, 3),
+                    stop_words="english",
+                    top_n=MAX_KEYWORDS,
+                    use_mmr=True,
+                    diversity=0.7,
+                )
+                keybert_terms = [kw[0] for kw in extracted]
+            except Exception as exc:
+                print(f"⚠️ KeyBERT extraction failed: {exc}.")
+
+        stop_words = {
+            "what",
+            "when",
+            "where",
+            "who",
+            "why",
+            "how",
+            "is",
+            "are",
+            "was",
+            "were",
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "with",
+            "about",
+        }
+        tokens = [w for w in re.findall(r"\b\w+\b", question_for_keywords.lower()) if len(w) > 2 and w not in stop_words]
+        fallback_terms = tokens[:MAX_FALLBACK_KEYWORDS]
+
+        merged_keywords = []
+        seen_kw = set()
+        for term in fallback_terms + keybert_terms:
+            normalized = (term or "").strip()
+            if not normalized:
+                continue
+            low = normalized.lower()
+            if low in seen_kw or low in neg_terms:
+                continue
+            seen_kw.add(low)
+            merged_keywords.append(normalized)
+            if len(merged_keywords) >= MAX_KEYWORD_TOTAL:
+                break
+
+        def _generate_phrase_queries():
+            phrases = []
+            base_text = question_for_keywords or ""
+            lowered_question = base_text.lower()
+            filtered_tokens = _filtered_tokens(base_text)
+            nouns_of_interest = {
+                "activities",
+                "activity",
+                "things",
+                "ideas",
+                "plans",
+                "places",
+                "options",
+                "spots",
+                "games",
+                "events",
+                "restaurants",
+                "meals",
+                "hobbies",
+                "recommendations",
+                "destinations",
+            }
+            qualifier_terms = []
+            for idx in range(len(filtered_tokens) - 1):
+                nxt = filtered_tokens[idx + 1]
+                if nxt in nouns_of_interest:
+                    token = filtered_tokens[idx]
+                    if token not in neg_terms and len(token) > 2:
+                        qualifier_terms.append(token)
+            qualifier_terms = list(dict.fromkeys(qualifier_terms))
+
+            relation_vocab = [
+                "girlfriend",
+                "boyfriend",
+                "partner",
+                "wife",
+                "husband",
+                "friend",
+                "friends",
+                "family",
+                "parents",
+                "kids",
+                "children",
+                "coworker",
+                "coworkers",
+                "colleague",
+                "colleagues",
+                "roommate",
+                "roommates",
+            ]
+            found_relations = [rel for rel in relation_vocab if rel in lowered_question]
+
+            for n in (2, 3):
+                for i in range(len(filtered_tokens) - n + 1):
+                    span = filtered_tokens[i : i + n]
+                    phrase = " ".join(span)
+                    if phrase:
+                        phrases.append(phrase)
+
+            for qual in qualifier_terms[:6]:
+                for noun in ("activities", "things", "ideas"):
+                    phrases.append(f"{qual} {noun}")
+
+            for rel in found_relations[:5]:
+                phrases.append(f"with my {rel}")
+                phrases.append(f"{rel} activities")
+                for qual in qualifier_terms[:4] or ["fun", "best"]:
+                    phrases.append(f"{qual} things to do with my {rel}")
+                    phrases.append(f"{qual} activities with {rel}")
+
+            prep_patterns = [
+                r"\bwith\s+(?:my|your|his|her|our|their|the)?\s*[A-Za-z][A-Za-z\s]{1,40}",
+                r"\bfor\s+(?:my|your|his|her|our|their|the)?\s*[A-Za-z][A-Za-z\s]{1,40}",
+            ]
+            for pat in prep_patterns:
+                for match in re.finditer(pat, base_text, flags=re.IGNORECASE):
+                    phrase = re.sub(r"\s+", " ", match.group(0).strip())
+                    if phrase:
+                        phrases.append(phrase)
+
+            for qual in qualifier_terms[:4]:
+                for kw in merged_keywords[:3]:
+                    if qual and kw and qual not in kw.lower():
+                        phrases.append(f"{qual} {kw}")
+
+            return phrases
+
+        queries = []
+        seen_queries = set()
+
+        def _add_query(text, limit):
+            norm = re.sub(r"\s+", " ", (text or "").strip())
+            if not norm:
+                return
+            key = norm.lower()
+            if key in seen_queries:
+                return
+            seen_queries.add(key)
+            queries.append({"text": norm, "limit": limit})
+
+        _add_query(question, base_limit)
+        if sanitized_question and sanitized_question.lower() != question.lower():
+            _add_query(sanitized_question, base_limit)
+
+        for info in neg_infos:
+            phrase = info.get("phrase")
+            target = info.get("target")
+            prefix = info.get("prefix") or ""
+            suffix = info.get("suffix") or ""
+            positive_focus = prefix.strip() or sanitized_question
+            if prefix:
+                _add_query(prefix, base_limit)
+            if suffix:
+                _add_query(suffix, base_limit)
+            if phrase:
+                _add_query(phrase, keyword_limit)
+                if positive_focus:
+                    _add_query(f"{positive_focus} {phrase}", phrase_limit)
+            if target:
+                cleaned_target = re.sub(r"\s+", " ", target).strip()
+                if cleaned_target and positive_focus:
+                    _add_query(f"{positive_focus} {cleaned_target}", phrase_limit)
+            if sanitized_question and phrase:
+                _add_query(f"{sanitized_question} {phrase}", phrase_limit)
+            if sanitized_question and target:
+                cleaned_target = re.sub(r"\s+", " ", target or "").strip()
+                if cleaned_target:
+                    _add_query(f"{sanitized_question} {cleaned_target}", phrase_limit)
+
+        for kw in merged_keywords:
+            _add_query(kw, keyword_limit)
+        for phrase in _generate_phrase_queries():
+            _add_query(phrase, phrase_limit)
+
+        a_map = {}
+        b_map = {}
+        search_time_by_user = {speaker_1_user_id: 0.0, speaker_2_user_id: 0.0}
+
+        with self._thread_pool(MAX_WORKERS, "mem-search-1421-base") as executor:
+            futures = []
+            for payload in queries:
+                q_text = payload["text"]
+                limit = payload["limit"]
+                futures.append(executor.submit(_search, speaker_1_user_id, q_text, limit))
+                futures.append(executor.submit(_search, speaker_2_user_id, q_text, limit))
+            for future in as_completed(futures):
+                uid, mems, duration = future.result()
+                search_time_by_user[uid] = search_time_by_user.get(uid, 0.0) + float(duration or 0.0)
+                for mem in mems:
+                    if uid == speaker_1_user_id:
+                        _add_to_map(a_map, mem)
+                    else:
+                        _add_to_map(b_map, mem)
+
+        global_pool = list(a_map.values()) + list(b_map.values())
+        global_pool_sorted = sorted(global_pool, key=lambda x: float(x.get("score", 0.0)), reverse=True)
+        prf_docs = global_pool_sorted[: min(PRF_K, len(global_pool_sorted))]
+        prf_text = " \n".join(m.get("memory", "") for m in prf_docs)
+
+        prf_terms = []
+        if kw_model is not None and prf_text:
+            try:
+                extracted = kw_model.extract_keywords(
+                    prf_text,
+                    keyphrase_ngram_range=(1, 3),
+                    stop_words="english",
+                    top_n=PRF_KEYWORDS,
+                    use_mmr=True,
+                    diversity=0.7,
+                )
+                prf_terms = [kw[0] for kw in extracted]
+            except Exception as exc:
+                print(f"⚠️ PRF KeyBERT failed: {exc}.")
+        if not prf_terms:
+            prf_terms = [t for t in _filtered_tokens(prf_text) if len(t) > 2][:PRF_KEYWORDS]
+        prf_terms = [term for term in prf_terms if term.lower() not in neg_terms]
+
+        prf_queries = []
+        if prf_terms:
+            prf_queries.append(" ".join(prf_terms[:3]))
+        if len(prf_terms) >= 4:
+            prf_queries.append(" ".join(prf_terms[2:6]))
+
+        if prf_queries:
+            with self._thread_pool(MAX_WORKERS, "mem-search-1421-prf") as executor:
+                futures = []
+                for q_text in prf_queries:
+                    futures.append(executor.submit(_search, speaker_1_user_id, q_text, phrase_limit))
+                    futures.append(executor.submit(_search, speaker_2_user_id, q_text, phrase_limit))
+                for future in as_completed(futures):
+                    uid, mems, duration = future.result()
+                    search_time_by_user[uid] = search_time_by_user.get(uid, 0.0) + float(duration or 0.0)
+                    for mem in mems:
+                        if uid == speaker_1_user_id:
+                            _add_to_map(a_map, mem)
+                        else:
+                            _add_to_map(b_map, mem)
+
+        global_pool = list(a_map.values()) + list(b_map.values())
+        global_pool_sorted = sorted(global_pool, key=lambda x: float(x.get("score", 0.0)), reverse=True)
+
+        def _multi_hop_queries(base_question, docs):
+            if not docs or not getattr(self, "search_client", None):
+                return []
+            doc_lines = "\n".join(f"- {m.get('memory', '')}" for m in docs[:10])
+            constraint_line = ""
+            if neg_terms:
+                constraint_line = f"\nAvoid asking about: {', '.join(sorted(neg_terms))}."
+            prompt = f"""You are a retrieval planner that proposes follow-up search queries.
+User question:
+{base_question}
+
+Currently retrieved memories:
+{doc_lines}
+
+Suggest up to {MAX_MULTIHOP_QUERIES} additional short search queries that could retrieve missing complementary facts.{constraint_line}
+Format:
+Q1: ...
+Q2: ...
+Q3: ..."""
+            try:
+                resp = self.safe_chat(
+                    model=self.llm_model,
+                    messages=[{"role": "system", "content": prompt}],
+                    temperature=0.2,
+                )
+            except Exception as exc:
+                print(f"⚠️ Multi-hop planning failed: {exc}")
+                return []
+            text = resp.choices[0].message.content if resp.choices and resp.choices[0].message else ""
+            if not text:
+                return []
+            queries = []
+            for line in text.splitlines():
+                match = re.search(r"Q\d+:\s*(.+)", line.strip())
+                if not match:
+                    continue
+                candidate = match.group(1).strip()
+                if not candidate:
+                    continue
+                low = candidate.lower()
+                if neg_terms and any(term in low for term in neg_terms):
+                    continue
+                if candidate in queries:
+                    continue
+                queries.append(candidate)
+                if len(queries) >= MAX_MULTIHOP_QUERIES:
+                    break
+            return queries
+
+        coarse_docs = global_pool_sorted[:20]
+        hop_queries = _multi_hop_queries(question_for_keywords, coarse_docs)
+        if hop_queries:
+            with self._thread_pool(MAX_WORKERS, "mem-search-1421-hop") as executor:
+                futures = []
+                for q_text in hop_queries:
+                    futures.append(executor.submit(_search, speaker_1_user_id, q_text, followup_limit))
+                    futures.append(executor.submit(_search, speaker_2_user_id, q_text, followup_limit))
+                for future in as_completed(futures):
+                    uid, mems, duration = future.result()
+                    search_time_by_user[uid] = search_time_by_user.get(uid, 0.0) + float(duration or 0.0)
+                    for mem in mems:
+                        if uid == speaker_1_user_id:
+                            _add_to_map(a_map, mem)
+                        else:
+                            _add_to_map(b_map, mem)
+
+        global_pool = list(a_map.values()) + list(b_map.values())
+        global_pool_sorted = sorted(global_pool, key=lambda x: float(x.get("score", 0.0)), reverse=True)
+
+        def _extract_timestamp_seconds(item):
+            if not item:
+                return 0.0
+            ts_epoch = item.get("timestamp_epoch")
+            if ts_epoch is not None:
+                try:
+                    return float(ts_epoch)
+                except Exception:
+                    pass
+            ts_value = item.get("timestamp")
+            if ts_value is None:
+                return 0.0
+            try:
+                return float(ts_value)
+            except Exception:
+                pass
+            try:
+                parsed = datetime.fromisoformat(str(ts_value).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.timestamp()
+            except Exception:
+                return 0.0
+
+        def _recency_score(ts, now_ts_value):
+            if ts <= 0 or now_ts_value <= 0:
+                return 0.0
+            delta_days = max(0.0, (now_ts_value - ts) / 86400.0)
+            return math.exp(-math.log(2.0) * (delta_days / max(1e-6, half_life_days)))
+
+        reranker = self._ensure_reranker_model()
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
+        subjects = intent.get("subjects") or []
+        lex_question = _normalize_for_lex(question_for_keywords)
+
+        def _classify_query(q):
+            toks = _safe_lower_tokens(q)
+            has_id_like = any(re.search(r"[A-Za-z]*\d", t) for t in toks)
+            nav_like = len(toks) <= 4 and (has_id_like or any(len(t) > 5 for t in toks))
+            structured = any(t in {"v1", "v2", "online", "offline"} for t in toks) or intent.get("has_year") or intent.get("has_month")
+            domain_terms = {t for t in toks if (len(t) > 3 and (t[0].isupper() or any(ch.isdigit() for ch in t) or "_" in t))}
+            return {
+                "nav": nav_like,
+                "structured": structured,
+                "domain_terms": domain_terms,
+                "id_tokens": {t for t in toks if any(ch.isdigit() for ch in t)},
+            }
+
+        q_profile = _classify_query(question)
+
+        def _estimate_confidence(sorted_items):
+            if not sorted_items:
+                return 0.0
+            top = float(sorted_items[0].get("final_score", 0.0))
+            second = float(sorted_items[1].get("final_score", top - 0.01)) if len(sorted_items) > 1 else (top - 0.01)
+            margin = max(0.0, top - second)
+            denom = max(abs(top), abs(second), 1.0)
+            margin_conf = min(1.0, margin / denom)
+            hit_bonus = 0.05 if question_markers else 0.0
+            return max(0.0, min(1.0, margin_conf + hit_bonus))
+
+        def _pattern_delta(mem_text, base_rr, base_sem, base_lex):
+            delta = 0.0
+            toks = set(_safe_lower_tokens(mem_text))
+            # Field imbalance: 强词匹配但语义弱 → 轻扣；语义强且词少 → 轻抬
+            if base_lex > 2.5 and base_rr < 0.15:
+                delta -= 0.22
+            elif base_rr > 0.6 and base_lex < 0.6:
+                delta += 0.18
+            # Domain term coverage
+            domain_terms = q_profile.get("domain_terms") or set()
+            if domain_terms:
+                overlap = len(domain_terms & toks) / float(len(domain_terms))
+                if overlap > 0:
+                    delta += 0.25 * overlap
+                else:
+                    delta -= 0.12
+            # Entity/id consistency
+            id_tokens = q_profile.get("id_tokens") or set()
+            if id_tokens and not (id_tokens & toks):
+                delta -= 0.18
+            # Structured/time alignment
+            if q_profile.get("structured") or intent.get("is_time"):
+                delta += 0.1 * self._time_bonus(question, mem_text)
+            # Subject/action soft alignment
+            delta += 0.08 * self._subject_bonus(mem_text, subjects)
+            delta += 0.08 * self._action_bonus(question, mem_text)
+            return delta
+
+        def _score_after_rerank(cands):
+            if not cands:
+                return [], {}
+            base_scores = [float(m.get("score", 0.0)) for m in cands]
+            rerank_scores = self._ce_predict_cached(question, cands)
+            normalized = None
+            if rerank_scores is not None:
+                normalized = _normalize_scores([float(x) for x in rerank_scores])
+            if normalized is None:
+                normalized = _normalize_scores(base_scores)
+            if normalized is None:
+                normalized = base_scores
+
+            base_final_scores = {}
+            for idx, mem in enumerate(cands):
+                mem_text = mem.get("memory", "")
+                rr = normalized[idx] if idx < len(normalized) else 0.0
+                ts = _extract_timestamp_seconds(mem)
+                rec = _recency_score(ts, now_ts)
+
+                mem_markers = _extract_time_number_markers(mem_text)
+                overlap = question_markers & mem_markers
+                marker_boost = 0.24 * min(1.0, len(overlap) / max(1, len(question_markers))) if question_markers and overlap else 0.0
+                noise_penalty = -0.18 if self._is_noise_text(mem_text) and not _has_structured_tokens(mem_markers) else 0.0
+
+                base_val = rerank_weight * rr + recency_weight * rec + marker_boost + noise_penalty
+                base_val += 0.11 * self._subject_bonus(mem_text, subjects)
+                base_val += 0.13 * self._action_bonus(question, mem_text)
+                base_val += 0.18 * self._time_bonus(question, mem_text)
+                base_val += 0.07 * math.log1p(max(0.0, self._lexical_score(lex_question, _normalize_for_lex(mem_text))))
+
+                base_final_scores[id(mem)] = base_val
+                mem["rerank_score"] = rr
+                mem["final_score"] = base_val
+
+            base_sorted = sorted(cands, key=lambda x: x.get("final_score", 0.0), reverse=True)
+            base_conf = _estimate_confidence(base_sorted)
+
+            # 高置信度完全信任基础排序
+            if base_conf >= CONF_HIGH:
+                return base_sorted, {id(m): m.get("final_score", 0.0) for m in base_sorted}
+
+            # 低置信度时的软调权
+            lambda_eff = LAMBDA_BASE * max(0.0, 1.0 - base_conf)
+            adjusted_scores = {}
+            for mem in base_sorted:
+                mem_text = mem.get("memory", "")
+                rr = mem.get("rerank_score", 0.0)
+                sem = mem.get("score", 0.0)
+                lex = self._lexical_score(lex_question, _normalize_for_lex(mem_text))
+                delta = _pattern_delta(mem_text, rr, sem, lex)
+                delta = max(-DELTA_CLIP, min(DELTA_CLIP, delta))
+                adjusted = mem.get("final_score", 0.0) + lambda_eff * delta
+                mem["final_score_1421"] = adjusted
+                adjusted_scores[id(mem)] = adjusted
+
+            sorted_adjusted = sorted(base_sorted, key=lambda x: x.get("final_score_1421", x.get("final_score", 0.0)), reverse=True)
+
+            # 避免跷跷板：保护前 PROTECT_TOP 来自基础排序
+            if PROTECT_TOP > 0 and base_sorted:
+                locked = base_sorted[:PROTECT_TOP]
+                locked_ids = {id(m) for m in locked}
+                remainder = [m for m in sorted_adjusted if id(m) not in locked_ids]
+                sorted_adjusted = locked + remainder
+                for m in locked:
+                    adjusted_scores[id(m)] = m.get("final_score", adjusted_scores.get(id(m), 0.0))
+
+            return sorted_adjusted, adjusted_scores
+
+        def _normalize_scores(values):
+            if not values:
+                return None
+            mean = sum(values) / len(values)
+            variance = sum((v - mean) ** 2 for v in values) / len(values)
+            std = math.sqrt(variance)
+            if std < 1e-6:
+                return [0.0 for _ in values]
+            return [(v - mean) / std for v in values]
+
+        def _jaccard_filtered(a_text, b_text):
+            a = set(_filtered_tokens(a_text))
+            b = set(_filtered_tokens(b_text))
+            if not a or not b:
+                return 0.0
+            return len(a & b) / float(len(a | b))
+
+        def _mmr_select(candidates, score_map, k, lambda_value):
+            selected = []
+            selected_texts = []
+            remaining = list(candidates)
+            while remaining and len(selected) < k:
+                best = None
+                best_val = -1e9
+                for item in remaining:
+                    mem_text = item.get("memory", "")
+                    rel = score_map.get(id(item), 0.0)
+                    if not selected_texts:
+                        div_penalty = 0.0
+                    else:
+                        div_penalty = max(_jaccard_filtered(mem_text, prev) for prev in selected_texts)
+                    # 基于置信度动态调节 lambda：低置信度 → 更多相关性
+                    eff_lambda = lambda_value
+                    val = eff_lambda * rel - (1.0 - eff_lambda) * div_penalty
+                    if val > best_val:
+                        best_val = val
+                        best = item
+                if best is None:
+                    break
+                selected.append(best)
+                selected_texts.append(best.get("memory", ""))
+                remaining.remove(best)
+            return selected
+
+        a_candidates, b_candidates = list(a_map.values()), list(b_map.values())
+        rerank_executor = self._get_rerank_executor()
+        future_a = rerank_executor.submit(_score_after_rerank, a_candidates)
+        future_b = rerank_executor.submit(_score_after_rerank, b_candidates)
+        a_sorted, a_scores = future_a.result()
+        b_sorted, b_scores = future_b.result()
+
+        a_conf = _estimate_confidence(a_sorted)
+        b_conf = _estimate_confidence(b_sorted)
+        lambda_a = lambda_div + 0.05 * (CONF_LOW - a_conf) if a_conf < CONF_LOW else lambda_div
+        lambda_b = lambda_div + 0.05 * (CONF_LOW - b_conf) if b_conf < CONF_LOW else lambda_div
+        lambda_a = max(0.6, min(0.9, lambda_a))
+        lambda_b = max(0.6, min(0.9, lambda_b))
+
+        a_top = _mmr_select(a_sorted, a_scores, k=top_k, lambda_value=lambda_a) if a_sorted else []
+        b_top = _mmr_select(b_sorted, b_scores, k=top_k, lambda_value=lambda_b) if b_sorted else []
+
+        search_1_memory = [self._format_memory_line(m) for m in a_top]
+        search_2_memory = [self._format_memory_line(m) for m in b_top]
+        speaker_1_time = search_time_by_user.get(speaker_1_user_id, 0.0)
+        speaker_2_time = search_time_by_user.get(speaker_2_user_id, 0.0)
+        return search_1_memory, search_2_memory, speaker_1_time, speaker_2_time
+
     def _search_1420(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
         MAX_KEYWORDS = 8
         MAX_FALLBACK_KEYWORDS = 8
@@ -3569,6 +4341,9 @@ Q3: ..."""
                 speaker_1_time,
                 speaker_2_time,
             )
+        elif search_method == "14.21":
+            s1, s2, t1, t2 = self._search_1421(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
+            return (s1, s2, None, None, t1, t2)
         elif search_method == "14.20":
             s1, s2, t1, t2 = self._search_1420(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
             return (s1, s2, None, None, t1, t2)
