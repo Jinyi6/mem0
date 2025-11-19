@@ -220,10 +220,6 @@ _NUMERIC_KEYWORDS_EN = [
 class MemorySearch:
     """
     记忆搜索类，用于处理基于对话的问答任务
-    
-    支持多种搜索方法：
-    - 方法3: 问题分解 + 多查询搜索 + Reranking
-    - 方法5: 关键词提取 + PRF扩展 + Reranking + MMR多样化
     """
     
     def __init__(
@@ -3807,6 +3803,216 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             print(f"[vibe_rerank] {e} | raw LLM output: {raw[:80]}...")
             return []
 
+     # ==== 方案 1422: 可靠性增强版混合检索 ====
+    def _search_1422(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        """
+        14.22 可靠性增强版 (Reliable Hybrid Search)
+        核心逻辑：
+        1. 强制混合召回 (Mandatory Hybrid Recall): 即使向量检索置信度高，也强制并入 lexical search 结果。
+        2. 意图感知门控 (Intent-Aware Gating): 仅对宽泛意图启用快速返回，对时间/数字/实体类问题强制进入精细重排。
+        3. 硬约束校验 (Hard Constraints): 对主体错位（如 Jon vs Gina）进行强惩罚。
+        """
+        # 配置参数
+        CONF_HIGH = 0.80  # 提高置信度阈值（原0.64），更加保守
+        MANDATORY_LEXICAL_RESCUE = 5  # 强制召回的 Lexical Top-K
+        INITIAL_RECALL_LIMIT = max(80, top_k * 8)  # 扩大初始召回池，为 Lexical 留出空间
+        RERANK_WEIGHT = 0.65
+        LEXICAL_WEIGHT = 0.15
+        SUBJECT_MISMATCH_PENALTY = 0.5  # 主体不匹配时的惩罚系数
+        
+        intent = self._intent_148(question)
+        
+        # 判断是否为“硬事实”查询：时间、数字、或有明确主体的查询
+        is_hard_fact_query = (
+            intent.get("is_time") 
+            or intent.get("is_numeric") 
+            or (intent.get("subjects") and len(intent.get("subjects")) > 0)
+        )
+        
+        neg_terms, sanitized_question, _ = self._extract_negative_terms(question)
+        q_for_search = sanitized_question if sanitized_question else question
+
+        # 提取关键词
+        keywords = []
+        kw_model = self._ensure_keybert_model()
+        if kw_model:
+            try:
+                extracted = kw_model.extract_keywords(
+                    q_for_search, 
+                    keyphrase_ngram_range=(1, 2), 
+                    stop_words='english', 
+                    top_n=4
+                )
+                keywords = [kw[0] for kw in extracted]
+            except Exception:
+                pass
+        
+        if not keywords:
+             keywords = [w for w in re.findall(r"\b\w+\b", q_for_search.lower()) if len(w) > 3][:4]
+
+        search_queries = [question] + keywords[:2]
+        
+        # 辅助函数：执行搜索
+        def _execute_search(uid, queries, limit):
+            all_mems = {}
+            dur = 0.0
+            for q in queries:
+                mems, _, t = self.search_memory(uid, q, limit=limit)
+                dur += float(t or 0.0)
+                for m in mems:
+                    key = m["memory"]
+                    if key not in all_mems or m["score"] > all_mems[key]["score"]:
+                        all_mems[key] = m
+            return list(all_mems.values()), dur
+
+        # 辅助函数：处理单侧用户的记忆（召回 -> 混合 -> 重排）
+        def _process_side(uid, queries):
+            # 1. 广度召回
+            candidates, duration = _execute_search(uid, queries, INITIAL_RECALL_LIMIT)
+            if not candidates:
+                return [], duration
+            
+            # 2. 强制 Lexical Rescue (从召回池中捞取字面匹配高的)
+            # 注意：这里是在 candidates 内部捞，因为我们之前的 limit 很大
+            # 如果 vector search 彻底漏掉了 lexical match，这里也救不回来，但 limit=80 通常够了
+            lexical_scored = []
+            for m in candidates:
+                lx = self._lexical_score(question, m["memory"])
+                # 时间问题特别加权 Lexical
+                if intent.get("is_time"):
+                    tb = self._time_bonus(question, m["memory"])
+                    lx += tb * 1.5 
+                m["lexical_score"] = lx
+                lexical_scored.append(m)
+            
+            lexical_scored.sort(key=lambda x: x["lexical_score"], reverse=True)
+            lexical_rescue_candidates = lexical_scored[:MANDATORY_LEXICAL_RESCUE]
+            
+            # 3. 向量 Top-K
+            vector_candidates = sorted(candidates, key=lambda x: x["score"], reverse=True)[:top_k*2]
+            
+            # 4. 合并池 (去重)
+            merged_map = {id(m): m for m in vector_candidates}
+            for m in lexical_rescue_candidates:
+                merged_map[id(m)] = m
+            final_pool = list(merged_map.values())
+            
+            # 5. 门控检查 (Gating)
+            # 只有当: 置信度极高 AND 不是硬事实查询 AND 字面匹配也不差 时，才允许快速返回
+            # 否则，强制进入重排序
+            if vector_candidates:
+                top1_score = vector_candidates[0]["score"]
+                top2_score = vector_candidates[1]["score"] if len(vector_candidates) > 1 else 0.0
+                margin = top1_score - top2_score
+                # Lexical check: Top-1 vector result should have decent lexical overlap
+                top1_lex = self._lexical_score(question, vector_candidates[0]["memory"])
+                
+                can_fast_return = (
+                    margin > 0.15  # 向量区分度大
+                    and top1_score > CONF_HIGH  # 绝对分数高
+                    and not is_hard_fact_query  # 不是查时间/数字/实体
+                    and top1_lex > 0.2  # 字面匹配不至于太离谱
+                )
+                
+                if can_fast_return:
+                    return [self._format_memory_line(m) for m in vector_candidates[:top_k]], duration
+
+            # 6. 精细重排序 (Rerank)
+            reranker = self._ensure_reranker_model()
+            rerank_scores = [0.0] * len(final_pool)
+            
+            if reranker:
+                try:
+                    pairs = [[question, m["memory"]] for m in final_pool]
+                    rerank_scores = reranker.predict(pairs, show_progress_bar=False)
+                except Exception:
+                    rerank_scores = [m["score"] for m in final_pool] # Fallback
+                rerank_scores = [1 / (1 + math.exp(-float(s))) for s in rerank_scores]
+            # 7. 综合打分 (Scoring with Hard Constraints)
+            scored_results = []
+            now_ts = datetime.now(tz=timezone.utc).timestamp()
+            
+            q_subjects = set([s.lower() for s in intent.get("subjects") or []])
+
+            for idx, m in enumerate(final_pool):
+                mem_text = m["memory"]
+                rr = float(rerank_scores[idx]) if reranker else m["score"]
+                lx = m.get("lexical_score", self._lexical_score(question, mem_text))
+                
+                # 基础分
+                final_score = RERANK_WEIGHT * rr + LEXICAL_WEIGHT * lx
+                
+                # 时间衰减 (对于非历史查询)
+                ts_epoch = m.get("timestamp_epoch")
+                if ts_epoch:
+                    recency = math.exp(-math.log(2.0) * max(0.0, (now_ts - float(ts_epoch)) / 86400.0 / 14.0))
+                    final_score += 0.1 * recency
+
+                # --- 硬约束惩罚/奖励 ---
+                
+                # A. 主体匹配 (Hard Subject Constraint)
+                if q_subjects:
+                    m_subjects = set([s.lower() for s in self._extract_candidate_names(mem_text)])
+                    # 如果问题有主体，但记忆中完全没有重叠，大幅降权
+                    if not (q_subjects & m_subjects):
+                        # 但要小心: "Gina asked Jon..." (Gina is sub, Jon is obj)
+                        # 如果记忆里出现了 query subject，哪怕只是作为宾语，也不惩罚
+                        # 简单的 contains check
+                        # hits = sum(1 for s in q_subjects if s in mem_text.lower())
+                        m_tokens = set(re.findall(r"\b\w+\b", mem_text.lower()))
+                        hits = sum(1 for s in q_subjects if s in m_tokens)
+                        if hits == 0:
+                            final_score *= SUBJECT_MISMATCH_PENALTY
+                        else:
+                            final_score += 0.1  # Bonus for hit
+                
+                # B. 时间匹配 (Hard Time Constraint)
+                if intent.get("is_time"):
+                    t_bonus = self._time_bonus(question, mem_text)
+                    final_score += t_bonus * 0.4  # 强加权
+                    
+                # C. 否定词惩罚
+                if neg_terms:
+                    # 简单的 token 检查
+                    toks = set(re.findall(r"\b\w+\b", mem_text.lower()))
+                    if toks & neg_terms:
+                        final_score -= 0.3
+                
+                m["_final_score_1422"] = final_score
+                scored_results.append(m)
+            
+            scored_results.sort(key=lambda x: x["_final_score_1422"], reverse=True)
+            
+            # 8. MMR 多样性筛选 (防止重复)
+            # 使用简单的 Jaccard MMR
+            selected = []
+            selected_indices = []
+            
+            for i, item in enumerate(scored_results):
+                if len(selected) >= top_k:
+                    break
+                
+                is_dup = False
+                for sel_item in selected:
+                    sim = self._lexical_score(item["memory"], sel_item["memory"]) # Reuse lexical score function roughly
+                    if sim > 0.75: # High overlap
+                        is_dup = True
+                        break
+                
+                if not is_dup:
+                    selected.append(item)
+            
+            return [self._format_memory_line(m) for m in selected], duration
+
+        # 并行处理两方
+        with self._thread_pool(2, "mem-search-1422") as executor:
+            f1 = executor.submit(_process_side, speaker_1_user_id, search_queries)
+            f2 = executor.submit(_process_side, speaker_2_user_id, search_queries)
+            
+            res1, t1 = f1.result()
+            res2, t2 = f2.result()
+            
+        return res1, res2, t1, t2
 
     def Search(self, speaker_1_user_id, speaker_2_user_id, question, search_method, top_k_rerank=15, pbar=None):
         """
@@ -4415,6 +4621,9 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             return (s1, s2, None, None, t1, t2)
         elif search_method == "14.10":
             s1, s2, t1, t2 = self._search_1410(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
+            return (s1, s2, None, None, t1, t2)
+        elif search_method == "14.22":
+            s1, s2, t1, t2 = self._search_1422(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
             return (s1, s2, None, None, t1, t2)
         elif search_method == "6":
             if not len(self.speaker_1_full_memories) or not len(self.speaker_2_full_memories):

@@ -207,6 +207,12 @@ class MemoryADD:
         elif self.fact_extraction_mode == "14.7":
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_14_7
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_14_7
+        elif self.fact_extraction_mode == "14.8":
+            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_14_8
+            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_14_8
+        elif self.fact_extraction_mode == "14.9":
+            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_14_9
+            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_14_9
 
         if self.memory_decision_mode == "0":
             from mem0.configs.prompts import DEFAULT_UPDATE_MEMORY_PROMPT

@@ -965,6 +965,242 @@ Applied Principles: P2 (one event), P8 (vague relative time retained), P6 (faith
 Note that the following conversation happens at"""
 
 
+FACT_RETRIEVAL_PROMPT_14_8 = """
+[Role]
+You are a senior information‑extraction agent.  Your task is to carefully analyze the conversation and distill it into a structured, context‑rich list of “facts” about the user and any explicitly mentioned people.
+
+[Output Requirements]
+- Return only one valid JSON object with key "facts" whose value is a list of strings; for example: {"facts": ["…", "…"]}.
+- Write the facts in the same language as the input (if the conversation is in English, output English).
+- Extract facts only about the user or explicitly mentioned individuals based solely on the given conversation. Do not invent.  If the conversation contains speculation by the user, explicitly indicate in the fact that it is speculation.
+- If there are no extractable facts, return {"facts": []}.
+
+[Extraction Principles]
+P1 Per‑Subject & Per‑Event Separation (Entity‑Centered): For each subject and each distinct event or state, produce a separate fact.  Do not combine actions or attributes of multiple subjects in the same fact.  A fact should be about one person (or one entity) and one event/idea.  If multiple related events occur for one subject, you may produce individual facts and optionally a combined summary fact for clarity; moderate redundancy is allowed.
+
+P2 One Fact = One Complete Event/Idea: Each fact should describe a single complete thought, including as many of Who/What/When/Where/Why/Attributes as feasible without sacrificing clarity.  Parallel or independent matters (e.g., two activities on different dates, multiple plans or motivations) must be split into separate facts.  You may include a combined fact summarizing closely related events, but never merge unrelated items or multiple subjects.
+
+P3 Information Completeness: Capture all relevant details available in the conversation—participants, actions, objects, reasons, dates, locations, outcomes—so that the fact is context rich and understandable on its own.
+
+P4 Precision: Preserve qualifiers and details (exact times, places, conditions, constraints) to make facts unambiguous.  When names are known (e.g., "Alex," "Emily"), subsequent facts must use the name instead of vague pronouns.  If a name is unknown, use clear references such as "the user" or "Alex’s manager."  Numbers, dates and proper nouns must be exact.
+
+P5 Appropriate Completion: You may modestly complete pronouns and adverbials based on context so that the fact is self‑contained and understandable.  If the user explicitly states reasons (motivation/purpose/feelings), include them in the same fact to complete the thought.  Redundancy is allowed; a single utterance may yield multiple facts at different levels of detail (e.g., one fact per event and a combined summary fact).
+
+P6 Faithful, No Guesswork: Use original wording whenever possible; do not speculate or add information not supported by the conversation.  Clearly mark speculative statements as speculation.
+
+P7 List/Enumeration Completeness: When lists occur (e.g., books, locations, preferences), the record must include all items—no truncation or omissions.
+
+P8 Time Rules:
+— For relative time expressions referring to a specific calendar date, month, or year (e.g., “yesterday,” “the day before yesterday,” “tomorrow,” “last month,” “next month,” “earlier this month,” “last year,” “next year,” “the year before last”), append a normalized value in parentheses relative to the conversation date. For example, if said on June 2 2023, “yesterday” becomes： “yesterday (originally stated as yesterday relative to June 2 2023, i.e., June 1 2023)” and “last month” becomes: “last month (originally stated as last month relative to June 2023, i.e., May 2023)”. Always mention the reference point and include the specific normalized date, month, or year.
+— For all time expressions involving weeks, such as “last week,” “next week,” “this week,” “the third week,” “in two weeks,” “a few weeks ago,” “next Friday,” “last Friday,” or any expression anchored to a week-based unit, do not convert these into specific calendar dates. Keep the original wording and append a note like “(time relative to a specific day: 'next Friday')” to indicate that the expression is week-relative but intentionally not normalized. For example, “last week I traveled to New York” becomes: “last week I traveled to New York (time relative to a specific day: 'last week')”. 
+— For vague time expressions that cannot be anchored to a specific calendar date (e.g., “recently,” “later today,” “sometime this afternoon,” “earlier tonight”), keep the original wording and append a note identifying the vagueness, such as “(vague time expression: 'recently')”. For example, “I watched that movie recently” becomes: “I watched that movie recently (vague time expression: 'recently')”.
+
+P9 Image‑Related Facts: When a message includes an image and/or caption, append the following at the end of the fact using key‑value style separated by semicolons: ; image: <URL>; title: <text>.
+
+P10 Boundaries and Relevance: Ignore pleasantries, greetings, sympathy, and purely interrogative statements unless they introduce new factual information.  Maintain speaker attributions and preserve speculation.  For non‑user statements, prepend "X claims/said."  For third‑party speculation, mark it as "speculation."  Use bracketed notes for disambiguation when needed.
+
+[Format Conventions]
+- Each list element should be a complete, self‑contained statement that can stand alone; add parenthetical clarifications when necessary.  If needed, append image/caption notes at the end in the format: ; image: <URL>; title: <text>.
+
+[Examples]
+
+Example 1 | Small Talk & Irrelevant Content → Empty Result
+
+Input
+User: Hello! How are you?
+Assistant: I’m good—how can I help?
+
+Output
+{"facts": []}
+
+Applied Principles: P10 (ignore pleasantries), P6 (faithful/no invention)
+
+Example 2 | Identity Information Merged into a Single Entry (Per‑Subject & Complete Info)
+
+Input
+User: My name is Lin, and I work as a product manager in Shanghai.
+Assistant: Nice to meet you!
+
+Output
+{"facts": ["The user’s name is Lin, and they are a product manager working in Shanghai."]}
+
+Applied Principles: P1 (per subject), P2 (one complete idea), P3 (Who/What/Where), P4 (use the name “Lin”), P6 (faithful)
+
+Example 3 | One Complete Event (including Why) + Normalized Relative Time
+
+Input (conversation date: June 2 2023)
+User A: Yesterday at 10 a.m., I reviewed the product roadmap with Chen Wei in the second‑floor meeting room.
+User B: Because the roadmap will be released externally next week.
+
+Output
+{"facts": ["The user reviewed the product roadmap with Chen Wei at 10:00 a.m. yesterday in the second‑floor meeting room, because the roadmap will be released externally next week (originally stated as yesterday relative to June 2 2023, i.e., June 1 2023)."]}
+
+Applied Principles: P1, P2 (merge into one event), P3 (Who/What/When/Where/Why), P4 (name), P6 (faithful), P8 (normalized relative time)
+
+Example 4 | One Sentence Contains Two Independent Matters → Split into Two (Travel & Lodging), With Modest Completion; Redundancy Allowed
+
+Input (conversation date: June 2 2023)
+User: Next week I’m going to Beijing on a business trip, and I’ll stay three nights at the Renaissance Beijing Guomao Hotel.
+Assistant: Have a smooth trip.
+
+Output
+{
+  "facts": [
+    "The user plans to go to Beijing on a business trip next week (time relative to a specific day: 'next week').",
+    "During that business trip next week, the user plans to stay three nights at the Renaissance Beijing Guomao Hotel."
+  ]
+}
+
+Applied Principles: P2 (split independent matters), P3 (complete information), P6 (faithful), P8 (retain vague relative time)
+
+Example 5 | Preferences and Dislikes (Complete Enumeration, Separate Statements, Modest Completion)
+
+Input
+User: My most‑used programming languages are Python, Go, and Rust; I don’t really like JavaScript.
+Assistant: Understood.
+
+Output
+{
+  "facts": [
+    "The user’s most‑used programming languages are Python, Go, and Rust.",
+    "A programming language the user does not like is JavaScript."
+  ]
+}
+
+Applied Principles: P7 (complete enumeration), P2 (separate stances), P3 (complete expression), P6 (faithful)
+
+Example 6 | Speculative Statements Must Be Marked as “Speculation”
+
+Input
+User: I suspect the current network issue might be caused by the office router.
+Assistant: Try restarting it first.
+
+Output
+{"facts": ["The user speculates that the current network problem is caused by the office router."]}
+
+Applied Principles: P6 (faithful: preserve ‘speculation’), P10 (do not treat suggestions as facts)
+
+Example 7 | Image Facts (Attach URL and Title)
+
+Input
+User: This is my ideal home office.
+(Image URL: https://example.com/home‑office.jpg; Title: Floor‑to‑ceiling ocean view, single standing desk)
+
+Output
+{"facts": ["The user shows their ideal home office; image: https://example.com/home‑office.jpg; title: Floor‑to‑ceiling ocean view, single standing desk."]}
+
+Applied Principles: P9 (image‑related facts), P6 (faithful)
+
+Example 8 | Relative Time Normalized to “Month” + Complete Book List
+
+Input (conversation date: June 2 2023)
+User: Last month I finished reading ‘SICP’ and ‘Introduction to Algorithms.’
+
+Output
+{"facts": ["The user finished ‘SICP’ and ‘Introduction to Algorithms’ in May 2023 (originally stated as last month relative to June 2023, i.e., May 2023)."]}
+
+Applied Principles: P7 (complete enumeration), P8 (relative time → normalized month), P6 (faithful)
+
+Example 9 | The Same Fact Expressed Across Turns → Deduplicate and Merge into One
+
+Input
+User: I’m left‑handed.
+Assistant: Oh—
+User: I normally write with my left hand.
+
+Output
+{"facts": ["The user is left‑handed (normally writes with the left hand)."]}
+
+Applied Principles: P1 (per subject merge), P10 (deduplicate), P5 (modest completion for a self‑contained sentence), P6 (faithful)
+
+Example 10 | Two Activities on Different Dates → One Fact Each
+
+Input
+User: Our team did the first canary release on 2025‑03‑12 and the second on 2025‑04‑25; risk validation before full rollout went smoothly.
+Assistant: Congrats!
+
+Output
+{
+  "facts": [
+    "The user’s team performed the first canary release on 2025‑03‑12, and risk validation went smoothly.",
+    "The user’s team performed the second canary release on 2025‑04‑25, and risk validation went smoothly."
+  ]
+}
+
+Applied Principles: P2 (separate by date), P3 (include outcome/why when present)
+
+Example 11 | Multiple Subjects and Multiple Events → Separate Facts per Subject & Event; Combined Summary Optional
+
+Input (conversation date: January 20 2023)
+User: Jon: I lost my job as a banker yesterday, so I'm going to start my own dance studio because I'm passionate about dancing and want to share that joy.  Gina: I also lost my job at Door Dash this month; I'm not sure what's next.
+Assistant: Good luck to both of you!
+
+Output
+{
+  "facts": [
+    "Jon lost his job as a banker yesterday (originally stated as yesterday relative to January 20 2023, i.e., January 19 2023).",
+    "Jon is going to start his own dance studio because he is passionate about dancing and wants to share that joy.",
+    "Gina lost her job at Door Dash this month (originally stated as this month relative to January 2023).",
+    "Jon lost his job as a banker and plans to start his own dance studio because of his passion for dance (originally stated as yesterday relative to January 20 2023, i.e., January 19 2023)."
+  ]
+}
+
+Applied Principles: P1 (per subject & per event), P2 (split multiple events), P3 (complete information), P5 (redundant summary), P8 (relative time normalization), P10 (ignore sympathy)
+
+Example 12 | Vague Relative Time Expression → Keep Original Wording
+
+Input (conversation date: June 10 2023)
+User: I'm going to visit my parents next week.
+Assistant: Sounds nice!
+
+Output
+{"facts": ["The user plans to visit their parents next week (time relative to a specific day: 'next week')."]}
+
+Applied Principles: P2 (one event), P8 (vague relative time retained), P6 (faithful)
+------
+
+Note that the following conversation happens at"""
+
+
+FACT_RETRIEVAL_PROMPT_14_9 = """
+[Role]
+You are a senior information‑extraction agent.  Your task is to carefully analyze the conversation and distill it into a structured, context‑rich list of “facts” about the user and any explicitly mentioned people.
+
+[Output Requirements]
+- Return only one valid JSON object with key "facts" whose value is a list of strings; for example: {"facts": ["…", "…"]}.
+- Write the facts in the same language as the input (if the conversation is in English, output English).
+- Extract facts only about the user or explicitly mentioned individuals based solely on the given conversation. Do not invent.  If the conversation contains speculation by the user, explicitly indicate in the fact that it is speculation.
+- If there are no extractable facts, return {"facts": []}.
+
+[Extraction Principles]
+P1 Per‑Subject & Per‑Event Separation (Entity‑Centered): For each subject and each distinct event or state, produce a separate fact.  Do not combine actions or attributes of multiple subjects in the same fact.  A fact should be about one person (or one entity) and one event/idea.  If multiple related events occur for one subject, you may produce individual facts and optionally a combined summary fact for clarity; moderate redundancy is allowed.
+
+P2 One Fact = One Complete Event/Idea: Each fact should describe a single complete thought, including as many of Who/What/When/Where/Why/Attributes as feasible without sacrificing clarity.  Parallel or independent matters (e.g., two activities on different dates, multiple plans or motivations) must be split into separate facts.  You may include a combined fact summarizing closely related events, but never merge unrelated items or multiple subjects.
+
+P3 Information Completeness: Capture all relevant details available in the conversation—participants, actions, objects, reasons, dates, locations, outcomes—so that the fact is context rich and understandable on its own.
+
+P4 Precision: Preserve qualifiers and details (exact times, places, conditions, constraints) to make facts unambiguous.  When names are known (e.g., "Alex," "Emily"), subsequent facts must use the name instead of vague pronouns.  If a name is unknown, use clear references such as "the user" or "Alex’s manager."  Numbers, dates and proper nouns must be exact.
+
+P5 Appropriate Completion: You may modestly complete pronouns and adverbials based on context so that the fact is self‑contained and understandable.  If the user explicitly states reasons (motivation/purpose/feelings), include them in the same fact to complete the thought.  Redundancy is allowed; a single utterance may yield multiple facts at different levels of detail (e.g., one fact per event and a combined summary fact).
+
+P6 Faithful, No Guesswork: Use original wording whenever possible; do not speculate or add information not supported by the conversation.  Clearly mark speculative statements as speculation.
+
+P7 List/Enumeration Completeness: When lists occur (e.g., books, locations, preferences), the record must include all items—no truncation or omissions.
+
+P8 Time Rules:
+— For relative time expressions referring to a specific calendar date, month, or year (e.g., “yesterday,” “the day before yesterday,” “tomorrow,” “last month,” “next month,” “earlier this month,” “last year,” “next year,” “the year before last”), append a normalized value in parentheses relative to the conversation date. For example, if said on June 2 2023, “yesterday” becomes： “yesterday (originally stated as yesterday relative to June 2 2023, i.e., June 1 2023)” and “last month” becomes: “last month (originally stated as last month relative to June 2023, i.e., May 2023)”. Always mention the reference point and include the specific normalized date, month, or year.
+— For all time expressions involving weeks, such as “last week,” “next week,” “this week,” “the third week,” “in two weeks,” “a few weeks ago,” “next Friday,” “last Friday,” or any expression anchored to a week-based unit, do not convert these into specific calendar dates. Keep the original wording and append a note like “(time relative to a specific day: 'next Friday')” to indicate that the expression is week-relative but intentionally not normalized. For example, “last week I traveled to New York” becomes: “last week I traveled to New York (time relative to a specific day: 'last week')”. 
+— For vague time expressions that cannot be anchored to a specific calendar date (e.g., “recently,” “later today,” “sometime this afternoon,” “earlier tonight”), keep the original wording and append a note identifying the vagueness, such as “(vague time expression: 'recently')”. For example, “I watched that movie recently” becomes: “I watched that movie recently (vague time expression: 'recently')”.
+
+P9 Image‑Related Facts: When a message includes an image and/or caption, append the following at the end of the fact using key‑value style separated by semicolons: ; image: <URL>; title: <text>.
+
+P10 Boundaries and Relevance: Ignore pleasantries, greetings, sympathy, and purely interrogative statements unless they introduce new factual information.  Maintain speaker attributions and preserve speculation.  For non‑user statements, prepend "X claims/said."  For third‑party speculation, mark it as "speculation."  Use bracketed notes for disambiguation when needed.
+
+[Format Conventions]
+- Each list element should be a complete, self‑contained statement that can stand alone; add parenthetical clarifications when necessary.  If needed, append image/caption notes at the end in the format: ; image: <URL>; title: <text>.
+
+Note that the following conversation happens at"""
+
 
 UPDATE_MEMORY_PROMPT_14 = f"""
 You are a senior “Memory Curation Agent,” akin to a digital librarian for a knowledge base. Your task is to intelligently integrate new, high-fidelity facts into the existing memory base so it becomes more comprehensive, accurate, and up to date.
@@ -1427,6 +1663,7 @@ OUTPUT (return valid JSON only; begin with “{{” and end with “}}”)
   ]
 }}
 """
+
 
 
 # gpt给的
