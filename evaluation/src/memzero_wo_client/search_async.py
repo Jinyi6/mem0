@@ -4013,7 +4013,220 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             res2, t2 = f2.result()
             
         return res1, res2, t1, t2
+    
+    # ==== 方案 1423: HyDE Lite & Precision Enhanced ====
+    def _search_1423(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        """
+        14.23 HyDE Lite (Generative Expansion)
+        核心改进:
+        1. Generative Query Expansion: 对于"martial arts"泛词查询，LLM生成"Karate, Judo..."，解决向量召回缺失。
+        2. Date Anchoring: 针对"May 3"等具体日期，生成显式日期查询。
+        3. 继承 14.22 的 ranking 逻辑确保准确性。
+        """
+        
+        # --- Step 1: 意图与基础特征提取 ---
+        intent = self._intent_148(question)
+        neg_terms, sanitized_question, _ = self._extract_negative_terms(question)
+        q_for_search = sanitized_question if sanitized_question else question
+        
+        # --- Step 2: 生成式查询扩展 (HyDE Lite) ---
+        # 仅使用极短的 prompt 快速获取扩展词
+        expanded_terms = []
+        # 若包含明确日期，添加显式日期查询
+        if intent.get("is_time"):
+             # 提取日期字符串，这里复用正则逻辑简单提取
+             # e.g. "May 3", "2023"
+             date_matches = re.findall(r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?", q_for_search, re.I)
+             date_matches += re.findall(r"\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*", q_for_search, re.I)
+             date_matches += re.findall(r"\d{4}", q_for_search)
+             expanded_terms.extend(list(set(date_matches)))
+        
+        # 调用 LLM 进行关键词/实例扩展 (低延迟模式)
+        # Prompt 旨在让 LLM 脑补具体的例子 (martial arts -> karate) 或同义词
+        expansion_prompt = f"List 5 specific keywords, entities, short synonyms, or dates appearing in a likely answer to: '{q_for_search}'. Return comma-separated list only."
+        
+        try:
+            # 使用极低的 temperature 和 max_tokens 限制延迟
+            resp = self.safe_chat(
+                model=self.llm_model,
+                messages=[{"role": "system", "content": expansion_prompt}],
+                temperature=0.1,
+            )
+            content = resp.choices[0].message.content.strip()
+            # 简单的清洗
+            llm_terms = [t.strip() for t in content.split(',') if t.strip()]
+            expanded_terms.extend(llm_terms[:5]) # 限制数量
+        except Exception as e:
+            # 降级到 14.22 的 KeyBERT 提取
+            kw_model = self._ensure_keybert_model()
+            if kw_model:
+                try:
+                    extracted = kw_model.extract_keywords(q_for_search, keyphrase_ngram_range=(1, 2), stop_words='english', top_n=3)
+                    expanded_terms.extend([kw[0] for kw in extracted])
+                except:
+                    pass
+        
+        # --- Step 3: 组合查询并执行搜索 ---
+        # 去重
+        unique_queries = []
+        seen = set()
+        # 原问题最重要
+        unique_queries.append(q_for_search)
+        seen.add(q_for_search.lower())
+        
+        for t in expanded_terms:
+            if t and t.lower() not in seen:
+                unique_queries.append(t)
+                seen.add(t.lower())
+        
+        # 限制查询数量防止爆炸
+        final_queries = unique_queries[:5] 
+        
+        # --- Step 4: 复用 14.22 的优良排序逻辑，但使用扩展后的查询列表 ---
+        
+        MANDATORY_LEXICAL_RESCUE = 5
+        INITIAL_RECALL_LIMIT = max(80, top_k * 6) 
+        RERANK_WEIGHT = 0.65
+        LEXICAL_WEIGHT = 0.15
+        SUBJECT_MISMATCH_PENALTY = 0.5
 
+        def _process_side_1423(uid):
+            all_mems = {}
+            total_dur = 0.0
+            
+            # 并行执行所有扩展查询 (Broad Recall)
+            with self._thread_pool(min(len(final_queries), 3), "mem-search-1423-sub") as sub_exec:
+                futs = [sub_exec.submit(self.search_memory, uid, q, limit=INITIAL_RECALL_LIMIT) for q in final_queries]
+                for f in as_completed(futs):
+                    mems, _, t = f.result()
+                    total_dur += float(t or 0.0)
+                    for m in mems:
+                        key = m["memory"]
+                        # 简单的分数融合：如果多次召回，取最大分
+                        if key not in all_mems or m["score"] > all_mems[key]["score"]:
+                            all_mems[key] = m
+            
+            candidates = list(all_mems.values())
+            if not candidates:
+                return [], total_dur
+
+            # Lexical Rescue (针对原问题)
+            lexical_scored = []
+            for m in candidates:
+                lx = self._lexical_score(question, m["memory"]) # 用原问题算
+                
+                # Bonus: 如果包含 HyDE 扩展词，额外加分！(HyDE Hit Bonus)
+                for term in expanded_terms:
+                    if term.lower() in m["memory"].lower():
+                        lx += 0.25 # 强关联奖励
+
+                if intent.get("is_time"):
+                    tb = self._time_bonus(question, m["memory"])
+                    lx += tb * 2.0  # 时间题更强力的字面挽救
+                m["lexical_score"] = lx
+                lexical_scored.append(m)
+            
+            lexical_scored.sort(key=lambda x: x["lexical_score"], reverse=True)
+            rescue_cands = lexical_scored[:MANDATORY_LEXICAL_RESCUE]
+            
+            # Vector Top-K
+            vector_cands = sorted(candidates, key=lambda x: x["score"], reverse=True)[:top_k*2]
+            
+            # Merge
+            merged_map = {id(m): m for m in vector_cands}
+            for m in rescue_cands:
+                merged_map[id(m)] = m
+            final_pool = list(merged_map.values())
+
+            # Rerank
+            reranker = self._ensure_reranker_model()
+            rerank_scores = [0.0] * len(final_pool)
+            if reranker:
+                try:
+                    pairs = [[question, m["memory"]] for m in final_pool]
+                    rerank_scores = reranker.predict(pairs, show_progress_bar=False)
+                except:
+                    rerank_scores = [m["score"] for m in final_pool]
+
+            # Scoring
+            scored = []
+            now_ts = datetime.now(tz=timezone.utc).timestamp()
+            q_subjects = set([s.lower() for s in intent.get("subjects") or []])
+
+            for idx, m in enumerate(final_pool):
+                mem_text = m["memory"]
+                rr = float(rerank_scores[idx]) if reranker else m["score"]
+                lx = m.get("lexical_score", 0.0)
+                
+                final_score = RERANK_WEIGHT * rr + LEXICAL_WEIGHT * lx
+                
+                # 时间衰减
+                ts_epoch = m.get("timestamp_epoch")
+                if ts_epoch:
+                    recency = math.exp(-math.log(2.0) * max(0.0, (now_ts - float(ts_epoch)) / 86400.0 / 14.0))
+                    final_score += 0.1 * recency
+
+                # 硬约束
+                if q_subjects:
+                    # 检查是否包含主体（大小写不敏感）
+                    hits = sum(1 for s in q_subjects if s in mem_text.lower())
+                    
+                    # 特别针对 "Who" 问题：如果问题问 Who，且记忆里包含大写人名实体，给予奖励
+                    # 这是一个启发式规则，解决 "Who gave money" (Aunt) 的问题
+                    if "who" in question.lower() and not hits:
+                        # 检查是否有大写单词（可能是人名）
+                        caps = re.findall(r"\b[A-Z][a-z]+\b", mem_text)
+                        if caps:
+                             final_score += 0.1 # 潜在实体奖励
+
+                    if hits == 0:
+                         # 如果问题有明确主体，且记忆完全不包含，则惩罚
+                         # 但如果 "Who" 问题，可能主体就是未知的，所以要小心
+                        if "who" not in question.lower():
+                             final_score *= SUBJECT_MISMATCH_PENALTY
+                    else:
+                        final_score += 0.15 # 命中奖励
+                
+                if intent.get("is_time"):
+                    t_bonus = self._time_bonus(question, mem_text)
+                    final_score += t_bonus * 0.5 # 更强时间奖励
+                
+                if neg_terms:
+                    toks = set(re.findall(r"\b\w+\b", mem_text.lower()))
+                    if toks & neg_terms:
+                        final_score -= 0.3
+                
+                m["_final_score_1423"] = final_score
+                scored.append(m)
+
+            scored.sort(key=lambda x: x["_final_score_1423"], reverse=True)
+            
+            # MMR Selection (Stronger Diversity for "List" questions)
+            # 如果问题看起来是列举型的 (What areas, What items, Who people)，增强多样性
+            is_list_question = any(w in question.lower() for w in ["what items", "what areas", "what people", "list", "and"])
+            mmr_thresh = 0.65 if is_list_question else 0.75
+
+            selected = []
+            for item in scored:
+                if len(selected) >= top_k: break
+                is_dup = False
+                for sel in selected:
+                    if self._lexical_score(item["memory"], sel["memory"]) > mmr_thresh:
+                        is_dup = True
+                        break
+                if not is_dup:
+                    selected.append(item)
+            
+            return [self._format_memory_line(m) for m in selected], total_dur
+
+        with self._thread_pool(2, "mem-search-1423-main") as executor:
+            f1 = executor.submit(_process_side_1423, speaker_1_user_id)
+            f2 = executor.submit(_process_side_1423, speaker_2_user_id)
+            r1, t1 = f1.result()
+            r2, t2 = f2.result()
+        
+        return r1, r2, t1, t2
+        
     def Search(self, speaker_1_user_id, speaker_2_user_id, question, search_method, top_k_rerank=15, pbar=None):
         """
         执行记忆搜索，支持多种搜索策略
@@ -4625,6 +4838,9 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
         elif search_method == "14.22":
             s1, s2, t1, t2 = self._search_1422(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
             return (s1, s2, None, None, t1, t2)
+        elif search_method == "14.23":
+             s1, s2, t1, t2 = self._search_1423(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
+             return (s1, s2, None, None, t1, t2)
         elif search_method == "6":
             if not len(self.speaker_1_full_memories) or not len(self.speaker_2_full_memories):
                 self.__load_full_memories(speaker_1_user_id, speaker_2_user_id)
