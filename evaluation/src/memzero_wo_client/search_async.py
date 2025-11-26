@@ -4085,7 +4085,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
         # --- Step 4: 复用 14.22 的优良排序逻辑，但使用扩展后的查询列表 ---
         
         MANDATORY_LEXICAL_RESCUE = 5
-        INITIAL_RECALL_LIMIT = max(80, top_k * 6) 
+        INITIAL_RECALL_LIMIT = max(80, top_k * 6)
         RERANK_WEIGHT = 0.65
         LEXICAL_WEIGHT = 0.15
         SUBJECT_MISMATCH_PENALTY = 0.5
@@ -4130,7 +4130,9 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             rescue_cands = lexical_scored[:MANDATORY_LEXICAL_RESCUE]
             
             # Vector Top-K
-            vector_cands = sorted(candidates, key=lambda x: x["score"], reverse=True)[:top_k*2]
+            # 保留更大候选集，减少过早裁剪导致的召回损失
+            vector_cap = max(top_k * 4, 80)
+            vector_cands = sorted(candidates, key=lambda x: x["score"], reverse=True)[:vector_cap]
             
             # Merge
             merged_map = {id(m): m for m in vector_cands}
@@ -4204,11 +4206,11 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             # MMR Selection (Stronger Diversity for "List" questions)
             # 如果问题看起来是列举型的 (What areas, What items, Who people)，增强多样性
             is_list_question = any(w in question.lower() for w in ["what items", "what areas", "what people", "list", "and"])
-            mmr_thresh = 0.65 if is_list_question else 0.75
+            mmr_thresh = 0.65 if is_list_question else 0.85  # 更宽松，避免过度去重
 
             selected = []
+            leftovers = []
             for item in scored:
-                if len(selected) >= top_k: break
                 is_dup = False
                 for sel in selected:
                     if self._lexical_score(item["memory"], sel["memory"]) > mmr_thresh:
@@ -4216,6 +4218,16 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                         break
                 if not is_dup:
                     selected.append(item)
+                else:
+                    leftovers.append(item)
+                if len(selected) >= top_k:
+                    break
+
+            # 如果因为多样性约束导致数量不足，回填剩余候选，确保尽量凑满 top_k
+            if len(selected) < top_k:
+                need = min(top_k, len(scored)) - len(selected)
+                if need > 0:
+                    selected.extend(leftovers[:need])
             
             return [self._format_memory_line(m) for m in selected], total_dur
 
@@ -4838,7 +4850,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
         elif search_method == "14.22":
             s1, s2, t1, t2 = self._search_1422(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
             return (s1, s2, None, None, t1, t2)
-        elif search_method == "14.23":
+        elif search_method == "14.24":
              s1, s2, t1, t2 = self._search_1423(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
              return (s1, s2, None, None, t1, t2)
         elif search_method == "6":
