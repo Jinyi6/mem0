@@ -1265,40 +1265,29 @@ Memories for user {{speaker_2_user_id}}:
 Answer:
 """
 
-#基于版本0的修改
+# 基于版本0的修改（14.9 强化版）
 ANSWER_PROMPT_14_9 = """
 You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories.
 
-# CONTEXT:
-You have access to memories from two speakers in a conversation. These memories contain
-timestamped information that may be relevant to answering the question.
+# CONTEXT
+You have access to memories from two speakers in a conversation. These memories contain timestamped information that may be relevant to answering the question.
 
-# INSTRUCTIONS:
-1. Carefully analyze all provided memories from both speakers.
-2. Pay special attention to the timestamps to determine the answer.
-3. If the question asks about a specific event or fact, look for direct evidence in the memories.
-4. If the memories contain contradictory information, prioritize the most recent memory.
-5. When a memory uses relative time (e.g., "last year", "two months ago"), convert it to an absolute date/month/year
-   **only if it is uniquely determinable from the memory's timestamp**. Otherwise keep the original relative phrasing.
-6. Prefer absolute time in the final answer when uniquely determinable; avoid vague time words if a specific value is available.
-7. **When/Time questions:** return **exactly one** time point; do **not** list multiple dates or join with commas/"and"/"、".
-   Choose **earliest/first** if the question implies start/first/begin (e.g., "first/earliest/首次/最早/开始"),
-   otherwise choose **latest/most recent** if implied (e.g., "last/latest/recent/最近/最后一次").
-   Normalize format to `YYYY-MM-DD` (day known), else `YYYY-MM`, else `YYYY`.
-8. **Where questions:** treat location broadly — {city, state/province, country, **organization**, **department**, **team**, **platform**, **venue**} — and return the most specific available.
-9. Focus only on the content of the memories from both speakers. Do not confuse character names mentioned in memories with the actual users who created those memories.
-10. If the memories are insufficient, reply **exactly** with: "无法从提供的记忆中确定。" (use the question's language if not Chinese).
-11. Answer in the **same language** as the question.
-12. Output **only** the final answer on a **single line**, **no labels/prefixes** (e.g., do not write "Answer:"), **no parentheses/brackets**, **no explanations**.
-13. The final answer must be **≤ 20 words**.
+# INSTRUCTIONS (STRICT)
+1) Use ONLY the provided memories. Do not invent or assume facts.
+2) Resolve contradictions by preferring the MOST RECENT memory.
+3) Relative times → absolute only when uniquely determinable from the memory timestamp; otherwise keep the original phrasing. If a normalized date/month/year is provided in parentheses, use that normalized value.
+4) **When/Time questions:** output EXACTLY ONE time point. Use earliest/first if the question cues “first/earliest/开始/首次/最早”, otherwise use latest/most recent if cues “last/latest/recent/最近/最后一次”. Format preference: `YYYY-MM-DD` > `YYYY-MM` > `YYYY`. Do NOT list multiple times.
+5) **List/Which/What/Who/Where questions:** exhaustively aggregate ALL distinct items across both speakers, deduplicate (case-insensitive), keep the original wording of each item, and output them in one line separated by commas/“、”. Do NOT omit items if present in any memory.
+6) **Where questions:** treat location broadly (city/state/country/organization/team/platform/venue) and return the most specific available.
+7) If evidence is insufficient, reply exactly with: "无法从提供的记忆中确定。" (use the question’s language if not Chinese).
+8) Language: answer in the SAME language as the question.
+9) Output only the final answer on a SINGLE line—no labels, no reasoning, no brackets/parentheses. Keep length ≤ 20 words.
 
-# APPROACH (Think step by step, but do not show your work):
-1. Examine all memories related to the question.
-2. Compare timestamps and resolve contradictions per rule (most recent).
-3. Prefer explicit dates/times/locations; convert relative time only when uniquely determinable.
-4. Decide earliest vs latest for time questions per the question’s cue; ensure exactly one time point.
-5. Formulate a precise, concise answer based solely on the evidence in the memories.
-6. Double-check that the final answer directly addresses the question and follows the formatting constraints.
+# APPROACH (do silently)
+- Read all memories; collect evidence.
+- Convert relative time only when unique; otherwise keep the relative wording.
+- For list-type questions, gather all items, deduplicate, and include them all.
+- Double-check the final answer satisfies the format and directly answers the question.
 
 Memories for user {{speaker_1_user_id}}:
 

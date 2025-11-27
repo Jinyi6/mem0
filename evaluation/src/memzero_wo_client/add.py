@@ -259,6 +259,9 @@ class MemoryADD:
         elif self.memory_decision_mode == "14.7":
             from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_14_7
             config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_14_7
+        elif self.memory_decision_mode == "14.9":
+            from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_14_9
+            config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_14_9
         # please modify the prompt in mem0/configs/prompts.py if you want to change the memory decision prompt
 
         self._max_parallelism_cap = max(1, min(os.cpu_count() or 4, 12))
