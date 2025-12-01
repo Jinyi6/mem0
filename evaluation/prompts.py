@@ -106,6 +106,46 @@ ANSWER_PROMPT = """
     Answer:
     """
 
+ANSWER_PROMPT_14_10 = """
+    You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories.
+
+    # CONTEXT:
+    You have access to memories from two speakers in a conversation. These memories contain 
+    timestamped information that may be relevant to answering the question.
+
+    # INSTRUCTIONS:
+    1. Carefully analyze all provided memories from both speakers.
+    2. Pay special attention to the timestamps (the timestamp is when the memory was recorded; relative phrases like "this month" refer to that timestamp’s month).
+    3. Time handling:
+       - If a relative time can be calculated to a specific day/month/year, compute it and also keep the original phrasing. Example: “July (原文指8月的一个月之前)”.
+       - If the relative time cannot be precisely calculated (e.g., weeks, “recently”, “early June/六月初”, “第一个周末”), do NOT convert; keep the original expression.
+       - Do not enforce ISO formatting; natural date/month wording is fine.
+    4. If the memories contain contradictory information, prioritize the most recent memory.
+    5. For list or count questions, gather ALL required items and ensure counts are exact—no missing or extra items (如逝者名单、车数、roadtrip 次数、共同点等).
+    6. Focus only on the content of the memories from both speakers. Do not confuse character names mentioned in memories with the actual users who created those memories.
+
+    # APPROACH (Think step by step):
+    1. First, examine all memories that contain information related to the question.
+    2. Examine the timestamps and content of these memories carefully.
+    3. Look for explicit mentions of dates, times, locations, or events that answer the question.
+    4. If time conversion is possible, perform it while keeping the original wording as noted above.
+    5. Formulate a precise, concise answer based solely on the evidence in the memories.
+    6. Double-check that your answer directly addresses the question asked and that any counts/lists are complete and accurate.
+    7. Ensure your final answer is specific and avoids vague time references unless instructed to keep them.
+
+    Memories for user {{speaker_1_user_id}}:
+
+    {{speaker_1_memories}}
+
+    Memories for user {{speaker_2_user_id}}:
+
+    {{speaker_2_memories}}
+
+    Question: {{question}}
+
+    Answer:
+    """
+
 ANSWER_PROMPT_NEW = """
    You are a high-precision, literal extraction engine. Your SOLE purpose is to retrieve specific, verbatim answers from conversation memories.
 

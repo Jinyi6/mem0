@@ -421,6 +421,9 @@ class MemorySearch:
             elif answer_mode == "14.9":
                 from prompts import ANSWER_PROMPT_14_9
                 self.ANSWER_PROMPT = ANSWER_PROMPT_14_9
+            elif answer_mode == "14.10":
+                from prompts import ANSWER_PROMPT_14_10
+                self.ANSWER_PROMPT = ANSWER_PROMPT_14_10
             else:
                 self.logger.warning("Unknown answer_mode '%s'. Falling back to default prompt.", answer_mode)
                 self.ANSWER_PROMPT = ANSWER_PROMPT
@@ -4465,6 +4468,99 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
         search_1_memory = _select(a_scored)
         search_2_memory = _select(b_scored)
         return search_1_memory, search_2_memory, time_by_user.get(speaker_1_user_id, 0.0), time_by_user.get(speaker_2_user_id, 0.0)
+    
+    # ==== 方案 1426: Type-Aware High-Recall ====
+    def _search_1426(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        """
+        14.26: 在 14.25 基础上增加问题类型感知的重排/过滤。
+        - 轻量问句分类：时间/计数/人物属性/解释总结/对抗
+        - 时间类：优先含日期/月份/ago 等时间线索的记忆
+        - 计数/枚举类：优先包含数字/结构化计数标记的记忆
+        - 人物属性类：偏向主体匹配、近期片段
+        - 噪声过滤：若有主体提示，惩罚无主体命中的记忆
+        - 重复抑制：对近似文本签名做去重
+        """
+        intent = self._intent_148(question)
+        subjects = set([s.lower() for s in intent.get("subjects") or []])
+
+        def _classify_q(q: str):
+            ql = (q or "").lower()
+            time_hits = any(tok in ql for tok in _TIME_KEYWORDS_EN) or any(tok in ql for tok in _TIME_KEYWORDS_CN) or re.search(r"\d{4}", ql)
+            num_hits = any(tok in ql for tok in _NUMERIC_KEYWORDS_EN) or any(tok in ql for tok in _NUMERIC_KEYWORDS_CN) or re.search(r"\bhow many\b|\b几\b|\b多少\b", ql)
+            attr_hits = any(tok in ql for tok in ["favorite", "prefer", "like", "love", "enjoy", "pet", "pets", "hobby", "habit", "喜欢", "爱好", "偏好", "宠物"])
+            explain_hits = any(tok in ql for tok in ["why", "reason", "cause", "explain", "总结", "原因", "解释", "how come"])
+            tricky_hits = any(tok in ql for tok in ["not real", "fake", "是否真实", "真的吗", "trick", "challenge"])
+            return {
+                "is_time": bool(time_hits),
+                "is_count": bool(num_hits),
+                "is_attr": bool(attr_hits),
+                "is_explain": bool(explain_hits),
+                "is_tricky": bool(tricky_hits),
+            }
+
+        q_type = _classify_q(question)
+
+        # 先用 14.25 的高召回取一个更大的候选池，再做类型化重排
+        base_top_k = max(top_k * 2, top_k + 20)
+        s1_raw, s2_raw, t1, t2 = self._search_1425(speaker_1_user_id, speaker_2_user_id, question, base_top_k)
+
+        time_pat = re.compile(
+            r"(\b\d{4}\b|\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b|"
+            r"\bjan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec\b|"
+            r"yesterday|today|tomorrow|last week|next week|last month|next month|ago|year|month|week|day|"
+            r"去年|明年|今年|上周|下周|上月|下月|天前|日前|周前|月前)",
+            re.I,
+        )
+        num_pat = re.compile(r"\b\d+\b")
+
+        def _norm_sig(text: str):
+            low = re.sub(r"\\s+", " ", (text or "").lower()).strip()
+            low = re.sub(r"\\b\\d{4}-\\d{2}-\\d{2}\\b", "DATE", low)
+            low = re.sub(r"\\b\\d{4}\\b", "YEAR", low)
+            return low
+
+        def _rescore(memories):
+            scored = []
+            for idx, mem in enumerate(memories):
+                base = 1.0 / (idx + 1)
+                mlow = mem.lower()
+                score = base
+                has_time = bool(time_pat.search(mlow))
+                has_num = bool(num_pat.search(mlow)) or "num:" in mlow or "count" in mlow
+                if q_type["is_time"]:
+                    score += 0.8 if has_time else -0.6
+                if q_type["is_count"]:
+                    score += 0.6 if has_num else -0.3
+                if q_type["is_attr"] and not q_type["is_time"]:
+                    score += 0.15
+                if subjects:
+                    if any(s in mlow for s in subjects):
+                        score += 0.18
+                    else:
+                        score -= 0.15
+                scored.append((score, mem, has_time))
+
+            # 时间类：若有带时间线索的候选，优先过滤它们
+            if q_type["is_time"]:
+                with_time = [item for item in scored if item[2]]
+                if len(with_time) >= max(3, top_k // 2):
+                    scored = with_time
+
+            # 去重（近似文本签名）
+            seen = set()
+            deduped = []
+            for score, mem, ht in sorted(scored, key=lambda x: x[0], reverse=True):
+                sig = _norm_sig(mem)
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                deduped.append((score, mem))
+                if len(deduped) >= top_k * 2:
+                    break
+
+            return [m for _, m in sorted(deduped, key=lambda x: x[0], reverse=True)[:top_k]]
+
+        return _rescore(s1_raw), _rescore(s2_raw), t1, t2
         
     def Search(self, speaker_1_user_id, speaker_2_user_id, question, search_method, top_k_rerank=15, pbar=None):
         """
@@ -5082,6 +5178,9 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             return (s1, s2, None, None, t1, t2)
         elif search_method == "14.25":
             s1, s2, t1, t2 = self._search_1425(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
+            return (s1, s2, None, None, t1, t2)
+        elif search_method == "14.26":
+            s1, s2, t1, t2 = self._search_1426(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
             return (s1, s2, None, None, t1, t2)
         elif search_method == "6":
             if not len(self.speaker_1_full_memories) or not len(self.speaker_2_full_memories):
