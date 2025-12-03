@@ -5653,6 +5653,14 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             speaker_2_graph_memories=json.dumps(prompt_components["speaker_2_graph_memories"], indent=4),
         )
         response_content = None
+        base_system_instruction = (
+            "You are an intelligent memory assistant that must answer strictly"
+            " based on the provided memories and follow the user's instructions."
+        )
+        llm_messages = [
+            {"role": "system", "content": base_system_instruction},
+            {"role": "user", "content": answer_prompt},
+        ]
         request_id = f"answer-q-{uuid.uuid4()}"
         # 细化重试逻辑
         llm_error_retries = 0
@@ -5665,7 +5673,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             try:
                 answer_attempts += 1
                 response_content = self.answer_llm.generate_response(
-                    messages=[{"role": "system", "content": answer_prompt}],
+                    messages=llm_messages,
                     temperature=0.0,
                 )
                 self._log_llm_call(
