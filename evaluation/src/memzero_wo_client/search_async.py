@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -9,16 +10,16 @@ import traceback
 import uuid
 from contextlib import contextmanager
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
-import math
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 from jinja2 import Template
-from openai import OpenAI
+from mem0 import Memory
+from mem0.utils.factory import LlmFactory
 from prompts import ANSWER_PROMPT, ANSWER_PROMPT_GRAPH
 from tqdm import tqdm
-from mem0 import Memory
 from src.utils import compute_dataset_stats, stream_normalized_dataset
 
 load_dotenv()
@@ -273,16 +274,6 @@ class MemorySearch:
         self.collection_name = collection_name or self._derive_collection_name(qdrant_path)
         os.environ["MODEL"] = self.llm_model
         self.embedder_model = embedder_model
-        search_client_kwargs = {}
-        if llm_base_url:
-            search_client_kwargs["base_url"] = llm_base_url
-        if llm_api_key:
-            search_client_kwargs["api_key"] = llm_api_key
-        answer_client_kwargs = {}
-        if answer_llm_base_url:
-            answer_client_kwargs["base_url"] = answer_llm_base_url
-        if answer_llm_api_key:
-            answer_client_kwargs["api_key"] = answer_llm_api_key
         config = {
             "llm": {
                 "provider": "openai",
@@ -316,15 +307,9 @@ class MemorySearch:
             config["llm"]["config"]["api_key"] = llm_api_key
         if embedder_api_key:
             config["embedder"]["config"]["api_key"] = embedder_api_key
+        self._llm_provider = config["llm"]["provider"]
+        self._llm_config = deepcopy(config["llm"]["config"])
         self.top_k = top_k
-        self.search_client = OpenAI(**search_client_kwargs)
-        if (
-            answer_llm_base_url == llm_base_url
-            and answer_llm_api_key == llm_api_key
-        ):
-            self.answer_client = self.search_client
-        else:
-            self.answer_client = OpenAI(**answer_client_kwargs)
         self.output_path = output_path
         self.filter_memories = filter_memories
         self.is_graph = is_graph
@@ -350,6 +335,23 @@ class MemorySearch:
             shared_executor=self._io_executor,
         )
         self.memory.logger = self.logger
+        self.llm = self.memory.llm
+        self.answer_llm = self.llm
+        if (
+            self.answer_llm_model != self.llm_model
+            or answer_llm_base_url != llm_base_url
+            or answer_llm_api_key != llm_api_key
+        ):
+            answer_llm_config = deepcopy(self._llm_config)
+            answer_llm_config.update(
+                {
+                    "model": self.answer_llm_model,
+                    "openai_base_url": answer_llm_base_url,
+                }
+            )
+            if answer_llm_api_key:
+                answer_llm_config["api_key"] = answer_llm_api_key
+            self.answer_llm = LlmFactory.create(self._llm_provider, answer_llm_config)
         self._ensure_collection_exists()
 
         self._results_state_lock = threading.Lock()
@@ -2214,7 +2216,7 @@ class MemorySearch:
         global_pool_sorted = sorted(global_pool, key=lambda x: float(x.get("score", 0.0)), reverse=True)
 
         def _multi_hop_queries(base_question, docs):
-            if not docs or not getattr(self, "search_client", None):
+            if not docs or not getattr(self, "llm", None):
                 return []
             doc_lines = "\n".join(f"- {m.get('memory', '')}" for m in docs[:10])
             constraint_line = ""
@@ -2241,7 +2243,7 @@ Q3: ..."""
             except Exception as exc:
                 print(f"⚠️ Multi-hop planning failed: {exc}")
                 return []
-            text = resp.choices[0].message.content if resp.choices and resp.choices[0].message else ""
+            text = self._extract_llm_text(resp).strip()
             if not text:
                 return []
             queries = []
@@ -2975,7 +2977,7 @@ Q3: ..."""
         global_pool_sorted = sorted(global_pool, key=lambda x: float(x.get("score", 0.0)), reverse=True)
 
         def _multi_hop_queries(base_question, docs):
-            if not docs or not getattr(self, "search_client", None):
+            if not docs or not getattr(self, "llm", None):
                 return []
             doc_lines = "\n".join(f"- {m.get('memory', '')}" for m in docs[:10])
             constraint_line = ""
@@ -3002,7 +3004,7 @@ Q3: ..."""
             except Exception as exc:
                 print(f"⚠️ Multi-hop planning failed: {exc}")
                 return []
-            text = resp.choices[0].message.content if resp.choices and resp.choices[0].message else ""
+            text = self._extract_llm_text(resp).strip()
             if not text:
                 return []
             queries = []
@@ -3206,12 +3208,12 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             empty_hits = 0
             while True:
                 try:
-                    resp = self.search_client.chat.completions.create(
+                    resp = self.safe_chat(
                         model=self.llm_model,
                         messages=[{"role": "system", "content": prompt}],
                         temperature=0.0,
                     )
-                    text = (resp.choices[0].message.content or "").strip()
+                    text = self._extract_llm_text(resp).strip()
                     nums = re.findall(r"\d+", text)
                     seen = set()
                     idxs = []
@@ -3226,9 +3228,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                     if empty_hits >= 50:
                         break
                 except Exception as e:
-                    msg = str(e).lower()
-                    if "rate limit" in msg or "limit" in msg or "overloaded" in msg or "token" in msg:
-                        time.sleep(random.uniform(20, 40))
+                    self.logger.warning("LLM selection failed: %s", e)
                     continue
             # fallback to lexical排序
             memories_sorted = sorted(memories, key=lambda m: self._lexical_score(question, m.get("memory", "")), reverse=True)
@@ -3718,28 +3718,37 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                 response_preview or "N/A",
             )
 
-    def safe_chat(self, model=None, messages=None, temperature=0.0, sleep_time=20):
+    def safe_chat(self, model=None, messages=None, temperature=0.0, sleep_time=20, llm=None, response_format=None):
         """
-        安全的LLM调用，自动处理速率限制
+        安全的LLM调用，自动处理速率限制并复用 mem0 提供的 LLM 封装。
         
         Args:
-            model: 模型名称
+            model: 模型名称（可选，只用于在 search/answer LLM 之间进行选择）
             messages: 消息列表
             temperature: 温度参数
             sleep_time: 触发速率限制时的等待时间（秒）
+            llm: 显式指定的 LLM 实例
+            response_format: 可选的响应格式
             
         Returns:
-            LLM响应对象
+            LLM响应字符串或结构化对象
         """
         if messages is None:
             raise ValueError("messages 必须提供。")
-        model_name = model or self.llm_model or os.getenv("MODEL", "Qwen/Qwen3-14B")
+        llm_client = llm
+        if llm_client is None:
+            if model and model == getattr(self, "answer_llm_model", None) and getattr(self, "answer_llm", None):
+                llm_client = self.answer_llm
+            else:
+                llm_client = getattr(self, "llm", None)
+        if llm_client is None:
+            raise RuntimeError("LLM client is not initialized.")
         while True:
             try:
-                return self.search_client.chat.completions.create(
-                    model=model_name,
+                return llm_client.generate_response(
                     messages=messages,
                     temperature=temperature,
+                    response_format=response_format,
                 )
             except Exception as e:
                 s = str(e)
@@ -3748,6 +3757,19 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                     time.sleep(sleep_time)
                     continue
                 raise
+
+    def _extract_llm_text(self, response) -> str:
+        """Normalize LLM responses (str/dict) into a plain string."""
+        if response is None:
+            return ""
+        if isinstance(response, str):
+            return response
+        if isinstance(response, dict):
+            content = response.get("content")
+            if isinstance(content, str):
+                return content
+            return ""
+        return str(response)
 
     def __load_full_memories(self, speaker_1_user_id, speaker_2_user_id):
         t1 = time.time()
@@ -3787,8 +3809,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                 messages=[{"role": "system", "content": prompt}],
                 temperature=0.8,
             )
-            if resp.choices[0].message.content is not None:
-                raw = resp.choices[0].message.content.strip()
+            raw = self._extract_llm_text(resp).strip()
 
             nums = re.findall(r'\d+', raw)
             indices = []
@@ -4055,7 +4076,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                 messages=[{"role": "system", "content": expansion_prompt}],
                 temperature=0.1,
             )
-            content = resp.choices[0].message.content.strip()
+            content = self._extract_llm_text(resp).strip()
             # 简单的清洗
             llm_terms = [t.strip() for t in content.split(',') if t.strip()]
             expanded_terms.extend(llm_terms[:5]) # 限制数量
@@ -4291,7 +4312,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                 messages=[{"role": "system", "content": prompt}],
                 temperature=0.15,
             )
-            content = resp.choices[0].message.content.strip() if resp.choices and resp.choices[0].message else ""
+            content = self._extract_llm_text(resp).strip()
             if content:
                 expanded_terms.extend([t.strip() for t in content.split(",") if t.strip()])
         except Exception:
@@ -4617,10 +4638,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                     messages=[{"role": "system", "content": q_prompt}],
                     temperature=0.8,
             )
-            if q_response.choices[0].message.content is not None:
-                raw_text = q_response.choices[0].message.content.strip()
-            else:
-                raw_text = ""
+            raw_text = self._extract_llm_text(q_response).strip()
             question_list = re.findall(r'^\s*\d+\.\s*(.+)', raw_text, flags=re.M)
             
             # 收集所有子问题的搜索结果（去重）
@@ -5327,7 +5345,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                     messages=[{"role": "system", "content": subq_prompt}],
                     temperature=0.2,
                 )
-                subq_text = subq_response.choices[0].message.content.strip() if subq_response.choices else ""
+                subq_text = self._extract_llm_text(subq_response).strip()
             except Exception as exc:
                 self.logger.warning("Sub-question generation failed: %s", exc)
                 subq_text = ""
@@ -5561,12 +5579,10 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
         while True:
             try:
                 answer_attempts += 1
-                response = self.answer_client.chat.completions.create(
-                    model=self.answer_llm_model, 
-                    messages=[{"role": "system", "content": answer_prompt}], 
-                    temperature=0.0
+                response_content = self.answer_llm.generate_response(
+                    messages=[{"role": "system", "content": answer_prompt}],
+                    temperature=0.0,
                 )
-                response_content = response.choices[0].message.content
                 self._log_llm_call(
                     request_id,
                     llm_error_retries + other_error_retries,
