@@ -3803,6 +3803,27 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
 
         return "\n".join(details)
 
+    def _normalize_chat_messages(self, messages, fallback_instruction=None):
+        """Ensure chat payload contains at least one user/assistant message."""
+        if not messages:
+            raise ValueError("messages 必须提供。")
+
+        has_non_system = any((msg or {}).get("role") != "system" for msg in messages)
+        if has_non_system:
+            return messages
+
+        fallback_instruction = fallback_instruction or "You are a helpful assistant."
+        normalized = []
+        converted = False
+        for msg in messages:
+            text = msg.get("content", "") if isinstance(msg, dict) else ""
+            if text:
+                normalized.append({"role": "user", "content": text})
+                converted = True
+        if not converted:
+            normalized.append({"role": "user", "content": fallback_instruction})
+        return normalized
+
     def safe_chat(self, model=None, messages=None, temperature=0.0, sleep_time=20, llm=None, response_format=None):
         """
         安全的LLM调用，自动处理速率限制并复用 mem0 提供的 LLM 封装。
@@ -3828,10 +3849,11 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                 llm_client = getattr(self, "llm", None)
         if llm_client is None:
             raise RuntimeError("LLM client is not initialized.")
+        normalized_messages = self._normalize_chat_messages(messages)
         while True:
             try:
                 return llm_client.generate_response(
-                    messages=messages,
+                    messages=normalized_messages,
                     temperature=temperature,
                     response_format=response_format,
                 )
@@ -5653,14 +5675,12 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             speaker_2_graph_memories=json.dumps(prompt_components["speaker_2_graph_memories"], indent=4),
         )
         response_content = None
-        base_system_instruction = (
-            "You are an intelligent memory assistant that must answer strictly"
-            " based on the provided memories and follow the user's instructions."
+        base_instruction = (
+            "You are an intelligent memory assistant that must answer strictly based"
+            " on the provided memories and follow the user's instructions."
         )
-        llm_messages = [
-            {"role": "system", "content": base_system_instruction},
-            {"role": "user", "content": answer_prompt},
-        ]
+        combined_prompt = f"{base_instruction}\n\n{answer_prompt}".strip()
+        llm_messages = [{"role": "user", "content": combined_prompt}]
         request_id = f"answer-q-{uuid.uuid4()}"
         # 细化重试逻辑
         llm_error_retries = 0
