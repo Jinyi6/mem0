@@ -3550,6 +3550,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             except Exception as e:
                 retries += 1
                 error_message = str(e)
+                error_details = self._format_exception_details(e)
                 error_lower = error_message.lower()
                 if "collection" in error_lower and "not found" in error_lower:
                     self.logger.warning(
@@ -3565,13 +3566,14 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                 backoff = min(8.0, 0.75 * (2 ** (retries - 1))) + random.uniform(0.1, 0.6)
                 retry_sleeps.append(backoff)
                 self.logger.warning(
-                    "Retrying search for user %s...%s/%s | backoff=%.2fs | error_type=%s | error=%s\n%s",
+                    "Retrying search for user %s...%s/%s | backoff=%.2fs | error_type=%s | error=%s\n%s\n%s",
                     user_id,
                     retries,
                     max_retries,
                     backoff,
                     type(e).__name__,
                     error_message,
+                    error_details,
                     traceback.format_exc(),
                 )
                 if retries >= max_retries:
@@ -3717,6 +3719,89 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                 prompt_chars,
                 response_preview or "N/A",
             )
+
+    def _format_exception_details(self, exc, body_preview_chars=2000):
+        """Format detailed information about HTTP/API exceptions for logging."""
+        try:
+            preview_limit = max(0, int(body_preview_chars))
+        except (TypeError, ValueError):
+            preview_limit = 2000
+
+        def _truncate(text: str) -> str:
+            if not text:
+                return ""
+            if preview_limit and len(text) > preview_limit:
+                return f"{text[:preview_limit]}... [truncated {len(text) - preview_limit} chars]"
+            return text
+
+        details = [f"{type(exc).__name__}: {exc}"]
+
+        for attr in ("code", "error_code", "status_code", "http_status"):
+            value = getattr(exc, attr, None)
+            if value:
+                details.append(f"{attr}={value}")
+
+        response = getattr(exc, "response", None) or getattr(exc, "http_response", None)
+        if response is not None:
+            status = getattr(response, "status_code", None)
+            reason = getattr(response, "reason_phrase", None) or getattr(response, "reason", None)
+            request_obj = getattr(response, "request", None)
+            method = getattr(request_obj, "method", None)
+            url = getattr(request_obj, "url", None)
+            response_line_parts = []
+            if status is not None:
+                response_line_parts.append(f"HTTP {status}")
+            if reason:
+                response_line_parts.append(str(reason))
+            if method:
+                response_line_parts.append(method)
+            if url:
+                response_line_parts.append(str(url))
+            if response_line_parts:
+                details.append(" ".join(response_line_parts))
+
+            body_text = ""
+            if hasattr(response, "text"):
+                try:
+                    body_text = response.text or ""
+                except Exception:
+                    body_text = ""
+            if not body_text and hasattr(response, "content"):
+                content = getattr(response, "content")
+                if isinstance(content, (bytes, bytearray)):
+                    body_text = content.decode("utf-8", errors="replace")
+                elif content is not None:
+                    body_text = str(content)
+            if not body_text and hasattr(response, "json"):
+                try:
+                    json_payload = response.json()
+                    body_text = json.dumps(json_payload, ensure_ascii=False)
+                except Exception:
+                    body_text = ""
+
+            if body_text:
+                try:
+                    parsed = json.loads(body_text)
+                    body_text = json.dumps(parsed, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+                details.append(f"response_body={_truncate(body_text)}")
+        elif hasattr(exc, "body"):
+            body_payload = getattr(exc, "body")
+            if body_payload:
+                if isinstance(body_payload, (dict, list)):
+                    body_content = json.dumps(body_payload, ensure_ascii=False, indent=2)
+                else:
+                    body_content = str(body_payload)
+                details.append(f"response_body={_truncate(body_content)}")
+
+        extra = getattr(exc, "error", None) or getattr(exc, "details", None)
+        if extra:
+            if isinstance(extra, (dict, list)):
+                extra = json.dumps(extra, ensure_ascii=False, indent=2)
+            details.append(f"extra={_truncate(str(extra))}")
+
+        return "\n".join(details)
 
     def safe_chat(self, model=None, messages=None, temperature=0.0, sleep_time=20, llm=None, response_format=None):
         """
@@ -5594,6 +5679,7 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                 )
                 break 
             except Exception as e:
+                error_details = self._format_exception_details(e)
                 error_str = str(e).lower()
                 if "rate limit" in error_str or "limit" in error_str or "overloaded" in error_str or "token" in error_str:
                     # 识别为LLM相关的限流错误
@@ -5602,19 +5688,42 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
                     sleep_duration = random.uniform(2, 20) + 5 * llm_error_retries
                     answer_sleep_penalty += sleep_duration
                     error_message = f"LLM Rate Limit related Error. Retrying in {sleep_duration:.2f}s... Error: {e}"
-                    self._log_llm_call(request_id, llm_error_retries, max_retries, prompt_components, answer_prompt, error_message, "Failed Attempt (Rate Limit)")
+                    detail_message = f"{error_message}\n{error_details}".strip()
+                    self._log_llm_call(
+                        request_id,
+                        llm_error_retries,
+                        max_retries,
+                        prompt_components,
+                        answer_prompt,
+                        detail_message,
+                        "Failed Attempt (Rate Limit)",
+                    )
+                    self.logger.warning(detail_message)
                     time.sleep(sleep_duration)
                 else:
                     # 识别为其他错误
                     other_error_retries += 1
                     if other_error_retries >= MAX_OTHER_ERROR_RETRIES:
-                        self.logger.error(f"Request ID [{request_id}] - Exceeded max retries ({MAX_OTHER_ERROR_RETRIES}) for non-rate-limit errors. Failing permanently. Error: {e}")
+                        failure_detail = (
+                            f"Request ID [{request_id}] - Exceeded max retries ({MAX_OTHER_ERROR_RETRIES}) for non-rate-limit errors. "
+                            f"Failing permanently. Error: {e}\n{error_details}"
+                        )
+                        self.logger.error(failure_detail)
                         response_content = "Error: Default response due to unrecoverable error." # 设置默认值
                         break # 达到最大次数，跳出循环
                     
                     error_message = f"An unexpected error occurred. Retrying immediately (attempt {other_error_retries}/{MAX_OTHER_ERROR_RETRIES})... Error: {e}"
-                    self._log_llm_call(request_id, other_error_retries, max_retries, prompt_components, answer_prompt, error_message, "Failed Attempt (Other Error)")
-                    self.logger.warning(error_message)
+                    detail_message = f"{error_message}\n{error_details}".strip()
+                    self._log_llm_call(
+                        request_id,
+                        other_error_retries,
+                        max_retries,
+                        prompt_components,
+                        answer_prompt,
+                        detail_message,
+                        "Failed Attempt (Other Error)",
+                    )
+                    self.logger.warning(detail_message)
                     
         response_time = max(0.0, time.time() - answer_start - answer_sleep_penalty)
         self.logger.info(
