@@ -16,7 +16,10 @@ from typing import Dict, Iterable, List, Optional, Tuple
 DIRECTORY_TO_ANALYZE: Optional[Path] = None
 
 # Example: COMBINED_JSON_FILES = [Path("run_a.json"), Path("run_b.json")]
-COMBINED_JSON_FILES: List[Path] = []
+COMBINED_JSON_FILES: List[Path] = [
+    Path("/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/long/evaluation_metrics_20251204_035221_combined.json"),
+    Path("/Users/jinyi/Documents/code/memory/mem0/evaluation/exp_data/long/evaluation_metrics_20251207_070239_combined.json")   
+]
 
 # Defaults to DIRECTORY_TO_ANALYZE (or the first file's parent when using a list).
 OUTPUT_DIRECTORY: Optional[Path] = None

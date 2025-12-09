@@ -4689,7 +4689,278 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             return [m for _, m in sorted(deduped, key=lambda x: x[0], reverse=True)[:top_k]]
 
         return _rescore(s1_raw), _rescore(s2_raw), t1, t2
-        
+
+    # ==== 方案 14.27: Protected-Query Hybrid ====
+    def _search_1427(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        """
+        14.27: 在高召回基础上增加“原始查询保护”与温和的类型感知打分，降低关键记忆被稀释的概率。
+        核心改动：
+          - 原问题检索结果前 N 条直接保护，后续 MMR 只填补剩余名额。
+          - 限制 query drift，只允许有限数量的关键词 / PRF 查询且偏好多词短语。
+          - 打分阶段继续使用 CrossEncoder/语义分数，但数值/时间提示只作为轻微加减分。
+        """
+
+        intent = self._intent_148(question)
+        kw_model = self._ensure_keybert_model()
+        reranker = self._ensure_reranker_model()
+
+        BASE_LIMIT = max(self.top_k * 2, 40)
+        EXTRA_QUERY_LIMIT = 6
+        KEYWORD_LIMIT = 3
+        PRF_LIMIT = 4
+        PROTECTED_PER_SIDE = min(5, max(2, top_k // 2))
+
+        def _search(uid, q, limit=BASE_LIMIT):
+            memories, _, duration = self.search_memory(uid, q, limit=limit)
+            return uid, memories, duration
+
+        def _add_to_map(dst, mem):
+            key = mem.get("memory")
+            if not key:
+                return
+            if key not in dst or float(mem.get("score", 0.0)) > float(dst[key].get("score", 0.0)):
+                dst[key] = mem
+
+        def _safe_tokens(text):
+            try:
+                return re.findall(r"\b\w+\b", (text or "").lower())
+            except Exception:
+                return []
+
+        def _time_hint(text):
+            lower = (text or "").lower()
+            if re.search(r"\b20\d{2}\b", lower):
+                return True
+            if re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b", lower):
+                return True
+            if any(tok in lower for tok in ["昨天", "今天", "明天", "上周", "下周", "上月", "下月", "去年", "今年", "明年"]):
+                return True
+            return False
+
+        def _protected_keys(memories):
+            return {m.get("memory") for m in memories[:PROTECTED_PER_SIDE] if m.get("memory")}
+
+        a_map, b_map = {}, {}
+        protected_a, protected_b = set(), set()
+        time_by_user = {speaker_1_user_id: 0.0, speaker_2_user_id: 0.0}
+
+        for uid in (speaker_1_user_id, speaker_2_user_id):
+            base_uid, mems, dur = _search(uid, question, limit=BASE_LIMIT)
+            time_by_user[uid] = time_by_user.get(uid, 0.0) + float(dur or 0.0)
+            for mem in mems:
+                if base_uid == speaker_1_user_id:
+                    _add_to_map(a_map, mem)
+                else:
+                    _add_to_map(b_map, mem)
+            if base_uid == speaker_1_user_id:
+                protected_a |= _protected_keys(mems)
+            else:
+                protected_b |= _protected_keys(mems)
+
+        # 构建额外查询（KeyBERT + fallback n-gram）
+        keywords = []
+        if kw_model:
+            try:
+                raw = kw_model.extract_keywords(
+                    question,
+                    keyphrase_ngram_range=(1, 3),
+                    stop_words="english",
+                    top_n=KEYWORD_LIMIT,
+                    use_mmr=True,
+                    diversity=0.7,
+                )
+                keywords = [kw for kw, _ in raw if len(kw.split()) >= 1]
+            except Exception:
+                keywords = []
+        if not keywords:
+            tokens = [t for t in _safe_tokens(question) if len(t) > 3]
+            keywords = [" ".join(tokens[i : i + 2]).strip() for i in range(len(tokens) - 1)]
+            keywords = [k for k in keywords if len(k.split()) >= 2][:KEYWORD_LIMIT]
+
+        extra_queries = []
+        seen_queries = set()
+
+        def _add_query(q):
+            norm = re.sub(r"\s+", " ", (q or "").strip())
+            if not norm:
+                return
+            key = norm.lower()
+            if key in seen_queries or key == question.lower():
+                return
+            seen_queries.add(key)
+            extra_queries.append(norm)
+
+        for kw in keywords:
+            _add_query(kw)
+        # fallback: question without wh-words
+        stripped = re.sub(r"\b(what|when|where|who|why|how)\b", "", question, flags=re.I)
+        _add_query(stripped)
+
+        extra_queries = extra_queries[:EXTRA_QUERY_LIMIT]
+
+        with self._thread_pool(min(EXTRA_QUERY_LIMIT, 4), "mem-search-1427-extra") as executor:
+            futures = []
+            for q in extra_queries:
+                futures.append(executor.submit(_search, speaker_1_user_id, q))
+                futures.append(executor.submit(_search, speaker_2_user_id, q))
+            for fut in as_completed(futures):
+                uid, mems, dur = fut.result()
+                time_by_user[uid] = time_by_user.get(uid, 0.0) + float(dur or 0.0)
+                for mem in mems:
+                    if uid == speaker_1_user_id:
+                        _add_to_map(a_map, mem)
+                    else:
+                        _add_to_map(b_map, mem)
+
+        # PRF 查询
+        def _prf_terms(dst_map):
+            if not dst_map:
+                return []
+            pool = sorted(dst_map.values(), key=lambda x: float(x.get("score", 0.0)), reverse=True)[:20]
+            prf_text = " \n".join(m.get("memory", "") for m in pool)
+            terms = []
+            if kw_model and prf_text:
+                try:
+                    pairs = kw_model.extract_keywords(
+                        prf_text,
+                        keyphrase_ngram_range=(1, 3),
+                        stop_words="english",
+                        top_n=PRF_LIMIT,
+                        use_mmr=True,
+                        diversity=0.6,
+                    )
+                    terms = [p[0] for p in pairs if len(p[0].split()) >= 2]
+                except Exception:
+                    terms = []
+            if not terms:
+                tokens = _safe_tokens(prf_text)
+                terms = [" ".join(tokens[i : i + 2]) for i in range(0, max(len(tokens) - 1, 0), 2)]
+            return terms[:PRF_LIMIT]
+
+        prf_queries = list(dict.fromkeys(_prf_terms(a_map) + _prf_terms(b_map)))[:PRF_LIMIT]
+        if prf_queries:
+            with self._thread_pool(3, "mem-search-1427-prf") as executor:
+                futures = []
+                for q in prf_queries:
+                    futures.append(executor.submit(_search, speaker_1_user_id, q))
+                    futures.append(executor.submit(_search, speaker_2_user_id, q))
+                for fut in as_completed(futures):
+                    uid, mems, dur = fut.result()
+                    time_by_user[uid] = time_by_user.get(uid, 0.0) + float(dur or 0.0)
+                    for mem in mems:
+                        if uid == speaker_1_user_id:
+                            _add_to_map(a_map, mem)
+                        else:
+                            _add_to_map(b_map, mem)
+
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
+
+        def _score_candidates(c_map, protected_keys):
+            cands = list(c_map.values())
+            if not cands:
+                return []
+            rerank_scores = None
+            if reranker:
+                try:
+                    pairs = [[question, m.get("memory", "")] for m in cands]
+                    rerank_scores = reranker.predict(pairs, show_progress_bar=False)
+                except Exception:
+                    rerank_scores = None
+
+            scored = []
+            recency_weight = 0.25 if intent.get("want_recent") else (0.18 if intent.get("is_time") else 0.1)
+            for idx, mem in enumerate(cands):
+                mem_text = mem.get("memory", "")
+                base_score = float(rerank_scores[idx]) if rerank_scores is not None else float(mem.get("score", 0.0))
+                lex = self._lexical_score(question, mem_text)
+                lex_norm = math.log1p(max(0.0, lex))
+                ts = mem.get("timestamp_epoch")
+                rec = 0.0
+                if ts:
+                    rec = math.exp(-math.log(2.0) * max(0.0, (now_ts - float(ts)) / 86400.0 / 10.0))
+                final_val = 0.72 * base_score + 0.18 * lex_norm + recency_weight * rec
+
+                has_time = _time_hint(mem_text)
+                has_number = bool(re.search(r"\b\d+\b", mem_text))
+                if intent.get("is_time"):
+                    final_val += 0.08 if has_time else -0.04
+                if intent.get("is_numeric"):
+                    final_val += 0.06 if has_number else -0.03
+                if protected_keys and mem.get("memory") in protected_keys:
+                    final_val += 0.2
+
+                subjects = intent.get("subjects") or []
+                if subjects:
+                    lowered = (mem_text or "").lower()
+                    subj_hits = sum(1 for s in subjects if s and s.lower() in lowered)
+                    if subj_hits:
+                        final_val += 0.05 * min(2, subj_hits)
+
+                final_val += 0.08 * self._time_bonus(question, mem_text)
+                final_val += 0.1 * self._action_bonus(question, mem_text)
+
+                mem["_score_1427"] = final_val
+                scored.append(mem)
+            scored.sort(key=lambda m: m["_score_1427"], reverse=True)
+            return scored
+
+        def _mmr_fill(candidates, protected_keys):
+            if not candidates:
+                return []
+            protected_items = [m for m in candidates if m.get("memory") in protected_keys]
+            protected_items = sorted(protected_items, key=lambda m: m["_score_1427"], reverse=True)[
+                : PROTECTED_PER_SIDE
+            ]
+            selected = []
+            selected_texts = []
+
+            def _add_item(item):
+                selected.append(item)
+                selected_texts.append(item.get("memory", ""))
+
+            for item in protected_items:
+                _add_item(item)
+
+            remaining = [m for m in candidates if m not in selected]
+
+            def _jaccard(a, b):
+                ta, tb = _safe_tokens(a), _safe_tokens(b)
+                if not ta or not tb:
+                    return 0.0
+                sa, sb = set(ta), set(tb)
+                return len(sa & sb) / float(len(sa | sb))
+
+            while remaining and len(selected) < top_k:
+                best_item = None
+                best_val = -1e9
+                for item in remaining:
+                    relevance = item["_score_1427"]
+                    diversity = max((_jaccard(item.get("memory", ""), t) for t in selected_texts), default=0.0)
+                    val = 0.8 * relevance - 0.2 * diversity
+                    if val > best_val:
+                        best_val = val
+                        best_item = item
+                if best_item is None:
+                    break
+                _add_item(best_item)
+                remaining.remove(best_item)
+
+            return selected[:top_k]
+
+        a_scored = _score_candidates(a_map, protected_a)
+        b_scored = _score_candidates(b_map, protected_b)
+        a_final = _mmr_fill(a_scored, protected_a)
+        b_final = _mmr_fill(b_scored, protected_b)
+
+        search_1_memory = [self._format_memory_line(m) for m in a_final]
+        search_2_memory = [self._format_memory_line(m) for m in b_final]
+        return (
+            search_1_memory,
+            search_2_memory,
+            time_by_user.get(speaker_1_user_id, 0.0),
+            time_by_user.get(speaker_2_user_id, 0.0),
+        )
+    
     def Search(self, speaker_1_user_id, speaker_2_user_id, question, search_method, top_k_rerank=15, pbar=None):
         """
         执行记忆搜索，支持多种搜索策略
@@ -5306,6 +5577,9 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             return (s1, s2, None, None, t1, t2)
         elif search_method == "14.26":
             s1, s2, t1, t2 = self._search_1426(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
+            return (s1, s2, None, None, t1, t2)
+        elif search_method == "14.27":
+            s1, s2, t1, t2 = self._search_1427(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
             return (s1, s2, None, None, t1, t2)
         elif search_method == "6":
             if not len(self.speaker_1_full_memories) or not len(self.speaker_2_full_memories):
