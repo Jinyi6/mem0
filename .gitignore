@@ -203,3 +203,10 @@ eval/
 qdrant_storage/
 .crossnote
 testing.ipynb
+evaluation/src/memzero_wo_client/search_async2.py
+evaluation/src/memzero_wo_client/search_async3.py
+evaluation/src/memzero_wo_client/search_async4.py
+.gitignore
+evaluation/src/memzero_wo_client/search_async_bak_1208.py
+.gitignore
+evaluation/src/memzero_wo_client/search_async5.py

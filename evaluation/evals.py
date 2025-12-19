@@ -2,6 +2,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import re
 from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
@@ -208,7 +209,165 @@ def _evaluate_candidates(
     return best_answer, metrics_summary
 
 
-# --- 需求 3: 将原始 for 循环中的逻辑提取为独立的函数 ---
+# --- 需求 3 新增: MCQ 解析与评估 ---
+
+def _extract_mcq_answers(text: str) -> Set[str]:
+    """
+    鲁棒地从文本中提取 MCQ 选项。
+    支持格式: <answer>A</answer>, A</answer>, [A], (A), 纯字母 A, A,B 等。
+    """
+    text = str(text).strip()
+    
+    # 1. 尝试从 <answer>...</answer> 中提取
+    match_tag = re.search(r'<answer>(.*?)</answer>', text, re.IGNORECASE | re.DOTALL)
+    if match_tag:
+        content = match_tag.group(1).strip()
+    else:
+        # 尝试 broken tag A</answer>
+        match_end = re.search(r'(.*?)</answer>', text, re.IGNORECASE | re.DOTALL)
+        if match_end:
+             # 取最后一行的内容，或者最后几个字符，假设是 broken tag
+             content = match_end.group(1).strip()
+             # 如果内容很长，可能包含了推理过程，尝试只取最后一部分
+             if len(content) > 20: 
+                 # 启发式：取最后5个字符看看有没有选项
+                 content_suffix = content[-5:]
+                 if re.search(r'[A-F]', content_suffix, re.IGNORECASE):
+                     content = content_suffix
+                 else:
+                     pass # 还是用全文吧
+        else:
+            content = text
+
+    # 将 content 转大写
+    content_upper = content.upper()
+
+    # 提取 A-F (假设选项在 A-F 之间)
+    # 优先匹配括号模式 [A], (A)
+    # re.findall 返回所有非重叠匹配
+    
+    # 模式1: 被括号包围的单个字母
+    bracketed = re.findall(r'[\[\(]([A-F])[\]\)]', content_upper)
+    if bracketed:
+        return set(bracketed)
+        
+    # 模式2: 也就是用户可能直接输出 A, B 或者 A B
+    # 为了避免匹配单词中的 A (如 "A cat"), 我们使用单词边界
+    # 并且通常 MCQ 答案很短。如果 content 主要是 "Option A", "Truth is B"
+    
+    matches = re.findall(r'\b([A-F])\b', content_upper)
+    
+    # 这里有个风险： "I select A because B is wrong." -> {'A', 'B'}
+    # 但由于我们之前已经截取了 <answer> 标签或者 Final Answer 之后的内容，风险较小。
+    # 另外增加一个启发式：如果提取出的字母过多，只取第一个？对于多选这不适用。
+    # 考虑到 Eval 通常是 0/1 分，我们要求完全匹配。如果是 "A because B" 导致提取了 AB，那这也是模型输出不够规范的错。
+    
+    if matches:
+        return set(matches)
+        
+    return set()
+
+def _is_likely_mcq_gt(candidates: List[str]) -> bool:
+    """
+    判断 Ground Truth 是否看起来像选择题答案。
+    """
+    if not candidates:
+        return False
+    # 检查所有候选答案能否被解析为选项集合，并且不为空
+    valid = True
+    for c in candidates:
+        extracted = _extract_mcq_answers(str(c))
+        if not extracted:
+            valid = False
+            break
+        # 还要防止它是普通文本碰巧含有 A/B。通常 GT 是很干净的 "A" 或 "(A)"
+        if len(str(c).strip()) > 10: # 如果 GT 很长，大概率不是纯选项
+            valid = False
+            break
+    return valid
+
+def print_metrics_summary(results_dict: Dict[str, List[Dict]], output_path: str):
+    """
+    打印按 Category 分组的指标统计摘要（仿照 generate_scores.py），保存到文件。
+    """
+    try:
+        with open(output_path, "w") as f:
+            f.write("\n" + "="*40 + "\n")
+            f.write("       METRICS SUMMARY PER CATEGORY\n")
+            f.write("="*40 + "\n")
+            
+            # 展平所有结果
+            all_items = []
+            for key, items in results_dict.items():
+                all_items.extend(items)
+                
+            if not all_items:
+                f.write("No results to summarize.\n")
+                return
+
+            # 按 category 分组
+            grouped = defaultdict(list)
+            for item in all_items:
+                cat = _coerce_numeric_key(item.get("category", "Unknown"))
+                grouped[cat].append(item)
+                
+            # 定义我们要统计的指标
+            metrics_of_interest = ["llm_score", "f1_score", "bleu_score", "mcq_score"]
+            
+            # 表头
+            headers = ["Category", "Count"] + [m.replace("_score", "").upper() for m in metrics_of_interest]
+            header_str = f"{headers[0]:<10} | {headers[1]:<6} | " + " | ".join(f"{h:<8}" for h in headers[2:])
+            f.write(header_str + "\n")
+            f.write("-" * 80 + "\n")
+            
+            # 计算并打印
+            # 排序：尝试按数字排序
+            try:
+                sorted_cats = sorted(grouped.keys(), key=lambda x: float(x))
+            except:
+                sorted_cats = sorted(grouped.keys(), key=str)
+                
+            overall_sums = defaultdict(float)
+            overall_counts = defaultdict(int)
+            
+            for cat in sorted_cats:
+                items = grouped[cat]
+                count = len(items)
+                row_str = f"{str(cat):<10} | {count:<6}"
+                
+                for metric in metrics_of_interest:
+                    # 提取该指标的所有非 None 值
+                    vals = [item.get(metric) for item in items if item.get(metric) is not None]
+                    if vals:
+                        mean_val = sum(vals) / len(vals)
+                        row_str += f" | {mean_val:>8.4f}"
+                        
+                        overall_sums[metric] += sum(vals)
+                        overall_counts[metric] += len(vals)
+                    else:
+                        row_str += f" | {'-':>8}"
+                f.write(row_str + "\n")
+                
+            f.write("-" * 80 + "\n")
+            
+            # 打印 Overall
+            overall_str = f"{'ALL':<10} | {len(all_items):<6}"
+            for metric in metrics_of_interest:
+                total_val = overall_sums[metric]
+                total_cnt = overall_counts[metric]
+                if total_cnt > 0:
+                    avg = total_val / total_cnt
+                    overall_str += f" | {avg:>8.4f}"
+                else:
+                    overall_str += f" | {'-':>8}"
+            f.write(overall_str + "\n")
+            f.write("="*40 + "\n")
+        
+        print(f"统计摘要已保存到 {output_path}")
+
+    except Exception as e:
+        print(f"⚠️ 无法写入统计摘要到文件: {e}")
+
 def process_single_item(
     item: Dict[str, object],
     enabled_metrics: Set[str],
@@ -227,27 +386,55 @@ def process_single_item(
     category = str(item["category"])
     question = str(item["question"])
 
-    # 跳过指定类别
-    # if category == "5":
-    #     return None  # 返回 None 以便主循环可以跳过它
+    # 逻辑修改: 判断是否进行 MCQ 评估
+    # 条件: 1. "mcq" 在 enabled_metrics 中
+    #      2. Ground Truth 看起来像 MCQ
+    
+    do_mcq = "mcq" in enabled_metrics and _is_likely_mcq_gt(answer_candidates)
+    
+    metrics_summary = {}
+    best_answer = ""
+    
+    if do_mcq:
+        # --- MCQ 评估路径 ---
+        pred_options = _extract_mcq_answers(pred_answer)
+        
+        # 对比每个 candidate (只要匹配中一个 candidate就算对)
+        is_correct = False
+        for cand in answer_candidates:
+            gt_options = _extract_mcq_answers(str(cand))
+            if gt_options and pred_options == gt_options:
+                is_correct = True
+                best_answer = str(cand)
+                break
+        
+        mcq_score = 1.0 if is_correct else 0.0
+        metrics_summary["mcq_score"] = mcq_score
+        
+        if not best_answer:
+             best_answer = str(answer_candidates[0]) if answer_candidates else ""
 
-    if all(candidate == "" for candidate in answer_candidates):
-        print(f"⚠️ Question '{question[:80]}...' has empty gold answers. Proceeding with empty string fallback.", flush=True)
-
-    try:
-        best_answer, metrics_summary = _evaluate_candidates(
-            question,
-            pred_answer,
-            answer_candidates,
-            enabled_metrics,
-            metric_helpers,
-        )
-    except Exception as exc:
-        print(
-            f"❌ Failed to evaluate question '{question[:80]}...' due to: {exc}. "
-            f"Candidates: {answer_candidates}"
-        , flush=True)
-        raise
+    else:
+        # --- 原有评估路径 (LLM, F1, BLEU) ---
+        if any(m in enabled_metrics for m in ["llm", "f1", "bleu"]):
+            try:
+                best_answer, metrics_res = _evaluate_candidates(
+                    question,
+                    pred_answer,
+                    answer_candidates,
+                    enabled_metrics,
+                    metric_helpers,
+                )
+                metrics_summary.update(metrics_res)
+            except Exception as exc:
+                print(
+                    f"❌ Failed to evaluate question '{question[:80]}...' due to: {exc}. "
+                    f"Candidates: {answer_candidates}"
+                , flush=True)
+                raise
+        else:
+            # 既不是 MCQ 又没开启其他指标
+            best_answer = str(answer_candidates[0]) if answer_candidates else ""
 
     # 返回处理结果字典
     result = {
@@ -255,8 +442,6 @@ def process_single_item(
         "answer": best_answer,
         "response": str(item["response"]),
         "category": category,
-        # "failure_mode": x x,
-        # "reasons_summary": x x,
     }
     for metric_name, value in metrics_summary.items():
         result[metric_name] = value
@@ -293,7 +478,7 @@ def main():
     args = parser.parse_args()
 
     metric_options = {metric.lower() for metric in args.metrics}
-    available_metrics = {"llm", "f1", "bleu"}
+    available_metrics = {"llm", "f1", "bleu", "mcq"}
     if "all" in metric_options:
         metric_options.update(available_metrics)
         metric_options.discard("all")
@@ -435,6 +620,11 @@ def main():
     print("评估完成，正在合并评估结果...")
     combined_results = merge_memory_and_scores(data, results_dict)
     save_json_file(combined_path, combined_results)
+
+    # 打印统计摘要
+    # 打印统计摘要
+    log_path = os.path.join(os.path.dirname(combined_path), "final_result.log")
+    print_metrics_summary(results, log_path)
 
     print(f"\n所有处理完成！结果已保存到 {args.output_file}")
     print(f"合并后的完整结果文件已保存到 {combined_path}")
