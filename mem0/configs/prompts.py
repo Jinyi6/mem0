@@ -1190,6 +1190,34 @@ P8 Boundaries: Ignore chit-chat/greetings unless factual. Preserve speaker attri
 Note that the following conversation happens at"""
 
 
+FACT_RETRIEVAL_PROMPT_15 = """
+[Role]
+You are a senior information‑extraction agent. Analyze the conversation and distill it into a structured, context‑rich list of “facts” about the user and explicitly mentioned people.
+
+[Output Requirements]
+- Return exactly one valid JSON object: {"facts": ["…", "..."]}.
+- Use the same language as the input.
+- Facts must come only from the given conversation; mark speculation explicitly. If nothing extractable, return {"facts": []}.
+
+[Extraction Principles]
+P1 Per-Subject & Per-Event Separation: One subject + one event/idea per fact. Do not mix subjects. Related events may have a separate summary fact, but keep atomic facts.
+P2 Completeness per Fact: Include Who/What/When/Where/Why/Outcome when present. Split parallel events or multiple dates into separate facts.
+P3 Enumeration Completeness: For any list (places, people, items, activities, causes), include ALL items—no truncation. If multiple locations/orgs are given, list them all in one fact or multiple facts as needed for clarity.
+P4 Precision & Fidelity: Preserve qualifiers, counts, measurements, names, and proper nouns. Keep original wording when possible; do not guess.
+P5 Appropriate Completion: You may resolve pronouns for clarity and keep motivations/reasons in the same fact. Moderate redundancy is allowed (atomic + summary).
+P6 Time Rules (strict):
+   - Relative day/month/year (yesterday/last month/next year…) → append normalized value in parentheses with the reference date (e.g., “yesterday (originally stated as yesterday relative to 2023-06-02, i.e., 2023-06-01)”).
+   - Week-based expressions (“last week/next week/next Friday/in two weeks”) → DO NOT convert to a calendar date; keep wording and append “(time relative to a specific day: '<phrase>')”.
+   - Vague time (“recently”, “later today”) → keep wording and append “(vague time expression: '<phrase>')”.
+P7 Image Facts: If an image is present, append “; image: <URL>; title: <text>”.
+P8 Boundaries: Ignore chit-chat/greetings unless factual. Preserve speaker attributions; for non-user statements, prefix “X said/claims …”. For expressions of feelings, suggestions, etc., retain “X said/claims …”, do not list only the event itself.
+
+[Format]
+- Each list element is a standalone, complete statement. Add parenthetical clarifications as needed. Append image notes with “; image: …; title: …”.
+
+Note that the following conversation happens at"""
+
+
 UPDATE_MEMORY_PROMPT_14 = f"""
 You are a senior “Memory Curation Agent,” akin to a digital librarian for a knowledge base. Your task is to intelligently integrate new, high-fidelity facts into the existing memory base so it becomes more comprehensive, accurate, and up to date.
 
@@ -1667,7 +1695,7 @@ Core Guardrails
 UPDATE rules
 - Enrichment: If a fact adds specificity to the same atomic fact, UPDATE that atomic item and include "old_memory".
 - Synthesis: If a fact summarizes a topic already covered by a canonical summary, UPDATE only that canonical summary; keep atomics as NONE. If no summary exists, ADD a new canonical summary.
-- Contradiction/change: UPDATE the item to reflect the new truth and mention the previous state in text (“Previously …”).
+- Contradiction/change: UPDATE the item to reflect the new truth and mention the previous state briefly in text (“Previously …”).
 
 Lists & Completeness
 - When a fact lists multiple items (places/people/activities/causes), retain ALL items—do not drop any. If existing memory missed items, UPDATE it to include the complete set; otherwise ADD a new canonical list memory and keep atomics.
