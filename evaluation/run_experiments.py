@@ -41,6 +41,7 @@ def main():
     # fact_extraction_mode
     parser.add_argument("--fact_extraction_mode", type=str, default="0", help="Fact extraction prompt mode")
     parser.add_argument("--memory_decision_mode", type=str, default="0", help="Memory decision prompt mode")
+    parser.add_argument("--fact_abstract_mode", type=str, default="0", help="Session-level abstraction mode")
     parser.add_argument("--search_mode", type=str, default="0", help="Search mode identifier")
     parser.add_argument("--answer_mode", type=str, default="0", help="Answer prompt mode")
     parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of worker threads")
@@ -164,6 +165,7 @@ def main():
                 qdrant_path=args.qdrant_path,
                 fact_extraction_mode=args.fact_extraction_mode,
                 memory_decision_mode=args.memory_decision_mode,
+                fact_abstract_mode=args.fact_abstract_mode,
                 add_mode=args.add_mode,
                 collection_name=args.collection_name,
                 llm_config=add_llm_config,

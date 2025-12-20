@@ -371,8 +371,13 @@ def main():
             config.get("add_params", {}).get("add_mode")
             or exp_params.get("add_mode")
         )
+        fact_abstract_mode_value = (
+            config.get("add_params", {}).get("fact_abstract_mode")
+            or exp_params.get("fact_abstract_mode")
+            or "0"
+        )
         add_command = [
-            "python", "-u", "./run_experiments.py",
+            "python",  "./run_experiments.py",
             "--method", "add",
             "--dataset_name", dataset_name,
             "--technique_type", technique_type,
@@ -381,7 +386,9 @@ def main():
             "--qdrant_path", qdrant_path,
             "--workspace_dir", workspace_dir,
             "--fact_extraction_mode", exp_params.get("fact_extraction_mode", "0"),
+            "--add_mode", exp_params.get("add_mode", "0"),
             "--memory_decision_mode", exp_params.get("memory_decision_mode", "0"),
+            "--fact_abstract_mode", str(fact_abstract_mode_value),
             "--max_workers", str(add_max_workers),
             "--collection_name", collection_name,
         ]
@@ -411,7 +418,7 @@ def main():
             or exp_params.get("max_workers", 6)
         )
         search_command = [
-            "python", "-u", "./run_experiments.py",
+            "python", "./run_experiments.py",
             "--method", "search",
             "--dataset_name", dataset_name,
             "--output_folder", workspace_dir,

@@ -28,19 +28,18 @@ from tqdm import tqdm
 ANSWER_LLM_CONFIG = {
     "model": "Qwen/Qwen3-14B",
     "base_url": "https://api.siliconflow.cn/v1",
-    "api_key": "sk-rvhjpegrpizurzchtlsupycdrqnxgqutpeerkkrikjrzqcqn",
+    "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul",
 }
 
 EVALUATOR_LLM_CONFIG = {
-    "model": "Qwen/Qwen2.5-14B-Instruct",
+    "model": "Qwen/Qwen3-14B",
     "base_url": "https://api.siliconflow.cn/v1",
-    "api_key": "sk-rvhjpegrpizurzchtlsupycdrqnxgqutpeerkkrikjrzqcqn",
+    "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul",
 }
 
 # Provide the list of experiment result files (relative to this script or absolute paths).
 EXPERIMENT_RESULT_FILES = [
-    "exp_data/locomo10_7/locomo10_7_top_k_30_filter_False_graph_False_3_1_5_0_20251015_200201/"
-    "mem0_locomo10_7_results_top_30_filter_False_graph_False_20251015_200201_3_1_5_0.json",
+    "longmemeval_d0_model_Qwen_Qwen3_14B_top_k_30_filter_False_graph_False_0_0_0_0_20251031_015142/mem0_longmemeval_d0_results_top_30_filter_False_graph_False_20251031_015142_0_0_0_0.json"
 ]
 
 DEFAULT_ANSWER_MAX_WORKERS = 8
@@ -149,7 +148,7 @@ def _run_evaluation(
     evaluator_config: Dict[str, str],
     max_workers: int,
 ) -> Path:
-    metrics_path = answer_file.with_name(f"evaluation_metrics_{time_tag}_{model_tag}.json")
+    metrics_path = answer_file.with_name(f"evaluation_metrics_1126_new106.json")
     cmd = [
         sys.executable,
         str(EVAL_SCRIPT_PATH),

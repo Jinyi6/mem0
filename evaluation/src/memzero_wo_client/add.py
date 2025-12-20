@@ -8,6 +8,7 @@ import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 import traceback
+from typing import Optional
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -156,6 +157,7 @@ class MemoryADD:
         self.figure_view = kwargs.get("figure_view", False)
         self.fact_extraction_mode = self._normalize_mode(kwargs.get("fact_extraction_mode", "0"))
         self.memory_decision_mode = self._normalize_mode(kwargs.get("memory_decision_mode", "0"))
+        self.fact_abstract_mode = self._normalize_mode(kwargs.get("fact_abstract_mode", "0"))
         self.add_mode = self._normalize_mode(kwargs.get("add_mode", "0"))
         self.llm_model = llm_model
 
@@ -392,6 +394,44 @@ class MemoryADD:
                 )
                 raise
 
+    def _summarize_session_memory(self, user_id: str, messages: list, timestamp: Optional[str]) -> None:
+        """
+        Generate and store a session-level summary memory for a given user.
+        """
+        if not messages:
+            return
+
+        conversation_text = "\n".join(f"{m.get('role', '')}: {m.get('content', '')}" for m in messages)
+        system_prompt = (
+            "You are a concise session summarizer. Read the conversation and produce a short summary that captures key "
+            "facts, decisions, preferences, and important events. Keep it crisp (3-5 bullet lines max), avoid "
+            "repetition, and retain concrete details like names, dates, and numbers when present. Output plain text."
+        )
+        user_prompt = f"Session timestamp: {timestamp or 'unknown'}\nConversation:\n{conversation_text}"
+
+        try:
+            summary = self.memory.llm.generate_response(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ]
+            )
+        except Exception as exc:
+            self.logger.warning("Session summary generation failed for %s: %s", user_id, exc)
+            return
+
+        if not summary:
+            return
+
+        metadata = self._build_timestamp_metadata(timestamp)
+        metadata["session_level"] = True
+        try:
+            with self._memory_semaphore:
+                self.memory.add(summary, user_id=user_id, metadata=metadata, infer=False)
+        except Exception as exc:
+            self.logger.warning("Failed to store session summary for %s: %s", user_id, exc)
+
+  
     def add_memories_for_speaker(
         self,
         speaker,
@@ -416,6 +456,22 @@ class MemoryADD:
                 with self._pbar_lock:
                     message_pbar.update(increment)
 
+        if self.fact_abstract_mode == "1":
+            self._summarize_session_memory(speaker, messages, timestamp)
+
+        if self.add_mode == "2":  # 在第一轮结束后，按Batch=60整体再存一组
+            for i in range(0, len(messages), 60): 
+                end_index = min(len(messages), i + 60)
+                try:
+                    self.add_memory(speaker, messages[i:end_index], metadata=self._build_timestamp_metadata(timestamp) or None)
+                except Exception as exc:
+                    self.logger.warning(f"Failed to add memory for batch 60: {exc}")
+                    self.add_memory(
+                        speaker,
+                        messages[i:end_index],
+                        metadata=self._build_timestamp_metadata(timestamp) or None,
+                    )
+                
     def process_conversation(self, item, idx, session_pbar=None, message_pbar=None):
 
         max_retries = 2  # 定义最大重试次数 (总共尝试 1 + 2 = 3 次)
