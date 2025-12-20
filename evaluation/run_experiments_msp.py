@@ -75,18 +75,18 @@ def main():
                     config[key] = value
         return config
 
-    allowed_fact_modes = {"0", "15_MSP"}
-    allowed_mem_modes = {"0", "147_MSP", "149_MSP"}
-    allowed_answer_modes = {"0", "15"}
-    allowed_search_modes = {"0", "5", "6", "1427", "14.27"}
-    if args.fact_extraction_mode not in allowed_fact_modes:
-        raise ValueError(f"fact_extraction_mode must be one of {sorted(allowed_fact_modes)}")
-    if args.memory_decision_mode not in allowed_mem_modes:
-        raise ValueError(f"memory_decision_mode must be one of {sorted(allowed_mem_modes)}")
-    if args.answer_mode not in allowed_answer_modes:
-        raise ValueError(f"answer_mode must be one of {sorted(allowed_answer_modes)}")
-    if args.search_mode not in allowed_search_modes:
-        raise ValueError(f"search_mode must be one of {sorted(allowed_search_modes)}")
+    # allowed_fact_modes = {"0", "15_MSP"}
+    # allowed_mem_modes = {"0", "147_MSP", "149_MSP"}
+    # allowed_answer_modes = {"0", "15"}
+    # allowed_search_modes = {"0", "5", "6", "1427", "14.27"}
+    # if args.fact_extraction_mode not in allowed_fact_modes:
+    #     raise ValueError(f"fact_extraction_mode must be one of {sorted(allowed_fact_modes)}")
+    # if args.memory_decision_mode not in allowed_mem_modes:
+    #     raise ValueError(f"memory_decision_mode must be one of {sorted(allowed_mem_modes)}")
+    # if args.answer_mode not in allowed_answer_modes:
+    #     raise ValueError(f"answer_mode must be one of {sorted(allowed_answer_modes)}")
+    # if args.search_mode not in allowed_search_modes:
+    #     raise ValueError(f"search_mode must be one of {sorted(allowed_search_modes)}")
 
     add_llm_config = build_provider_config(args.llm_model, args.llm_base_url, args.llm_api_key)
     search_llm_model = args.search_llm_model or args.llm_model

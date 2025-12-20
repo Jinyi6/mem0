@@ -134,9 +134,6 @@ class MemoryADD:
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT
         elif self.fact_extraction_mode == "15":
-            from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_15
-            config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_15
-        elif self.fact_extraction_mode == "15_MSP":
             from mem0.configs.prompts import FACT_RETRIEVAL_PROMPT_15_MSP
             config["custom_fact_extraction_prompt"] = FACT_RETRIEVAL_PROMPT_15_MSP
         # Add other modes as needed...
@@ -145,10 +142,10 @@ class MemoryADD:
             from mem0.configs.prompts import DEFAULT_UPDATE_MEMORY_PROMPT
             config["custom_update_memory_prompt"] = DEFAULT_UPDATE_MEMORY_PROMPT
 
-        elif self.memory_decision_mode == "147_MSP":
+        elif self.memory_decision_mode == "14.7":
              from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_147_MSP
              config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_147_MSP
-        elif self.memory_decision_mode == "149_MSP":
+        elif self.memory_decision_mode == "14.9":
              from mem0.configs.prompts import UPDATE_MEMORY_PROMPT_149_MSP
              config["custom_update_memory_prompt"] = UPDATE_MEMORY_PROMPT_149_MSP
 
