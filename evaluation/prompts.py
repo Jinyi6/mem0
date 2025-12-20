@@ -1382,3 +1382,79 @@ ANSWER_PROMPT_15 = """
 
     Answer:
     """
+
+ANSWER_PROMPT_0_MSP = """
+    You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories.
+
+    # CONTEXT:
+    You have access to memories from a conversation. These memories contain 
+    timestamped information that may be relevant to answering the question.
+
+    # INSTRUCTIONS:
+    1. Carefully analyze all provided memories.
+    2. Pay special attention to the timestamps to determine the answer
+    3. If the question asks about a specific event or fact, look for direct evidence in the memories
+    4. If the memories contain contradictory information, prioritize the most recent memory
+    5. If there is a question about time references (like "last year", "two months ago", etc.), 
+       calculate the actual date based on the memory timestamp. For example, if a memory from 
+       4 May 2022 mentions "went to India last year," then the trip occurred in 2021.
+    6. Always convert relative time references to specific dates, months, or years. For example, 
+       convert "last year" to "2022" or "two months ago" to "March 2023" based on the memory 
+       timestamp. Ignore the reference while answering the question.
+    7. Focus only on the content of the memories. Do not confuse character 
+       names mentioned in memories with the actual speakers who created those memories.
+    8. The answer should be less than 5-6 words.
+
+    # APPROACH (Think step by step):
+    1. First, examine all memories that contain information related to the question
+    2. Examine the timestamps and content of these memories carefully
+    3. Look for explicit mentions of dates, times, locations, or events that answer the question
+    4. If the answer requires calculation (e.g., converting relative time references), show your work
+    5. Formulate a precise, concise answer based solely on the evidence in the memories
+    6. Double-check that your answer directly addresses the question asked
+    7. Ensure your final answer is specific and avoids vague time references
+
+    Memories:
+
+    {{memories}}
+
+    Question: {{question}}
+
+    Answer:
+    """
+
+ANSWER_PROMPT_15_MSP = """
+    You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories.
+
+    # CONTEXT:
+    You have access to memories from a conversation. These memories contain 
+    timestamped information that may be relevant to answering the question.
+
+    # INSTRUCTIONS:
+    1. Carefully analyze all provided memories.
+    2. Pay special attention to the timestamps (the timestamp is when the memory was recorded; relative phrases like "this month" refer to that timestamp’s month).
+    3. Time handling:
+       - If a relative time can be calculated to a specific day/month/year, compute it and also keep the original phrasing. Example: “July (originally referring to one month before August)”.
+       - If the relative time cannot be precisely calculated (e.g., weeks, “recently”, “early June”, “the first weekend”), do NOT convert; keep the original expression.
+       - Do not enforce ISO formatting; natural date/month wording is fine.
+    4. If the memories contain contradictory information, prioritize the most recent memory.
+    5. For list or count questions, gather ALL required items and ensure counts are exact—no missing or extra items (e.g., list of deceased, list of cars, commonalities, etc.).
+    6. Focus only on the content of the memories. Do not confuse character names mentioned in memories with the actual users who created those memories.
+
+    # APPROACH (Think step by step):
+    1. First, examine all memories that contain information related to the question.
+    2. Examine the timestamps and content of these memories carefully.
+    3. Look for explicit mentions of dates, times, locations, or events that answer the question.
+    4. If time conversion is possible, perform it while keeping the original wording as noted above.
+    5. Formulate a precise, concise answer based solely on the evidence in the memories.
+    6. Double-check that your answer directly addresses the question asked and that any counts/lists are complete and accurate.
+    7. Ensure your final answer is specific and avoids vague time references unless instructed to keep them.
+
+    Memories:
+
+    {{memories}}
+
+    Question: {{question}}
+
+    Answer:
+    """

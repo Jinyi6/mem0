@@ -217,6 +217,11 @@ def main():
              "3: Start from Evaluate (requires existing_workspace_dir in config). "
              "4: Start from Generate Scores (requires existing_workspace_dir in config)."
     )
+    parser.add_argument(
+        "--use_msp_runner",
+        action="store_true",
+        help="If set, invoke run_experiments_msp.py instead of the default runner."
+    )
     args = parser.parse_args()
 
     # 1. Load Configuration
@@ -353,19 +358,31 @@ def main():
     mem0_state_dir = os.path.join(state_workspace_dir, ".mem0_state")
     os.makedirs(mem0_state_dir, exist_ok=True)
     os.environ["MEM0_DIR"] = mem0_state_dir
+    msp_runner = args.use_msp_runner
+    runner_script = "./run_experiments_msp.py" if msp_runner else "./run_experiments.py"
+
     if technique_type == "full_context":
         search_results_raw_filename = f"full_context_{dataset_name}_results.json"
         search_results_filename = f"full_context_{dataset_name}_results_{run_timestamp}.json"
     else:
-        search_results_raw_filename = (
-            f"mem0_{dataset_name}_results_top_{top_k_str}_"
-            f"filter_{filter_memories_str}_graph_{is_graph_str}.json"
-        )
-        search_results_filename = (
-            f"mem0_{dataset_name}_results_top_{top_k_str}_"
-            f"filter_{filter_memories_str}_graph_{is_graph_str}_"
-            f"{run_timestamp}_{fact_extraction_mode_str}_{memory_decision_mode_str}_{search_mode_str}_{answer_mode_str}.json"
-        )
+        if msp_runner:
+            search_results_raw_filename = (
+                f"msp_{dataset_name}_results_top_{top_k_str}_mode_{search_mode_str}.json"
+            )
+            search_results_filename = (
+                f"msp_{dataset_name}_results_top_{top_k_str}_mode_{search_mode_str}_"
+                f"{run_timestamp}_{fact_extraction_mode_str}_{memory_decision_mode_str}_{answer_mode_str}.json"
+            )
+        else:
+            search_results_raw_filename = (
+                f"mem0_{dataset_name}_results_top_{top_k_str}_"
+                f"filter_{filter_memories_str}_graph_{is_graph_str}.json"
+            )
+            search_results_filename = (
+                f"mem0_{dataset_name}_results_top_{top_k_str}_"
+                f"filter_{filter_memories_str}_graph_{is_graph_str}_"
+                f"{run_timestamp}_{fact_extraction_mode_str}_{memory_decision_mode_str}_{search_mode_str}_{answer_mode_str}.json"
+            )
     shutil.copy(args.config, os.path.join(workspace_dir, f"config_{run_timestamp}.json"))
     search_results_raw_path = os.path.join(workspace_dir, search_results_raw_filename)
     search_results_path = os.path.join(workspace_dir, search_results_filename)
@@ -393,7 +410,7 @@ def main():
             or exp_params.get("add_mode")
         )
         add_command = [
-            "python", "-u", "./run_experiments.py",
+            "python", "-u", runner_script,
             "--method", "add",
             "--dataset_name", dataset_name,
             "--technique_type", technique_type,
@@ -432,7 +449,7 @@ def main():
             or exp_params.get("max_workers", 6)
         )
         search_command = [
-            "python", "-u", "./run_experiments.py",
+            "python", "-u", runner_script,
             "--method", "search",
             "--dataset_name", dataset_name,
             "--output_folder", workspace_dir,
