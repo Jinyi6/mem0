@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8"/>
+  <title>Evaluation Results Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f1f1f; }
+    h1, h2 { margin-bottom: 8px; }
+    section { margin-bottom: 28px; }
+    .meta { background: #f5f5f5; padding: 12px 16px; border-radius: 6px; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    img { max-width: 100%; height: auto; border: 1px solid #e0e0e0; border-radius: 4px; }
+    .caption { color: #666; font-size: 14px; margin-top: 4px; }
+    @media (max-width: 900px) {
+      .pair { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Evaluation Results Report</h1>
+
+  <section>
+    <h2>1. 数据概览</h2>
+    <div class="meta">
+      <div>原始总行数：168</div>
+      <div>筛选后行数：98</div>
+      <div>低信息 query 数量：59</div>
+      <div>中文字符数少于 4 的条目：70</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 关键字段直方图</h2>
+    <div class="pair">
+      <div>
+        <img src="report_assets/hist_all_data.png" alt="All data hist"/>
+        <div class="caption">All data - Key Numeric Distributions</div>
+      </div>
+      <div>
+        <img src="report_assets/hist_filtered_data.png" alt="Filtered data hist"/>
+        <div class="caption">Filtered data - Key Numeric Distributions</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 胜者统计</h2>
+    <div class="pair">
+      <div>
+        <img src="report_assets/winner_all_data.png" alt="All data winner"/>
+        <div class="caption">All data - Winner Distribution</div>
+      </div>
+      <div>
+        <img src="report_assets/winner_filtered_data.png" alt="Filtered data winner"/>
+        <div class="caption">Filtered data - Winner Distribution</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 各维度得分</h2>
+    <div class="grid">
+      <img src="report_assets/dimension_scores.png" alt="Dimension scores"/>
+      <div class="caption">Dimension Scores with Error Bars (Mean ± Std)</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. query 长度分桶下的胜者分布变化</h2>
+    <div class="grid">
+      <img src="report_assets/winner_by_query_bucket.png" alt="Winner by query length bucket"/>
+      <div class="caption">Winner by Query Length Bucket</div>
+    </div>
+  </section>
+</body>
+</html>
