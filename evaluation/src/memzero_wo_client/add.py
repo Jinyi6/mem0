@@ -98,6 +98,9 @@ class MemoryADD:
 
         legacy_embedder_model = kwargs.get("embedder_model")
         legacy_embedder_dims = kwargs.get("embedding_dims")
+        
+        # Initialize spacy model for entity extraction (lazy loading)
+        self._nlp_model = None
         embedder_model = embedder_config.get("model") or legacy_embedder_model or DEFAULT_EMBEDDER_MODEL
         embedder_base_url = embedder_config.get("base_url") or llm_base_url
         embedder_api_key = embedder_config.get("api_key") or llm_api_key
@@ -159,6 +162,11 @@ class MemoryADD:
         self.memory_decision_mode = self._normalize_mode(kwargs.get("memory_decision_mode", "0"))
         self.fact_abstract_mode = self._normalize_mode(kwargs.get("fact_abstract_mode", "0"))
         self.add_mode = self._normalize_mode(kwargs.get("add_mode", "0"))
+        self.long_term_profile_mode = self._normalize_mode(kwargs.get("long_term_profile_mode", "0"))
+        if self.long_term_profile_mode == "0":
+            self.long_term_profile_mode = False
+        else:
+            self.long_term_profile_mode = True
         self.llm_model = llm_model
 
         qdrant_path = config["vector_store"]["config"]["path"]
@@ -431,7 +439,299 @@ class MemoryADD:
         except Exception as exc:
             self.logger.warning("Failed to store session summary for %s: %s", user_id, exc)
 
-  
+    def _ensure_spacy_model(self):
+        """Lazy load spacy model for entity extraction."""
+        if self._nlp_model is None:
+            try:
+                import spacy
+                # disable参数禁用了不需要的组件，能提升速度
+                # en_core_web_trf
+                # en_core_web_sm
+                self._nlp_model = spacy.load("en_core_web_trf", disable=["parser", "textcat"])
+                self.logger.info("✅ en_core_web_trf 模型加载成功！")
+            except OSError:
+                self.logger.warning("未找到 SpaCy 模型，正在尝试下载...")
+                try:
+                    from spacy.cli import download
+                    download("en_core_web_trf")
+                    import spacy
+                    self._nlp_model = spacy.load("en_core_web_trf", disable=["parser", "textcat"])
+                    self.logger.info("✅ en_core_web_trf 模型下载并加载成功！")
+                except Exception as e:
+                    self.logger.warning("SpaCy 模型加载失败: %s，将跳过实体提取", e)
+                    self._nlp_model = False  # Mark as failed to avoid retrying
+        return self._nlp_model if self._nlp_model is not False else None
+    
+    def _extract_entities_from_text(self, text: str) -> list:
+        """
+        从文本中提取实体（人名、组织名等）
+        
+        Args:
+            text: 要提取实体的文本
+            
+        Returns:
+            list: 提取到的实体列表（去重）
+        """
+        nlp_model = self._ensure_spacy_model()
+        if not nlp_model:
+            return []
+        
+        try:
+            doc = nlp_model(text)
+            # 提取人名(PERSON)、组织(ORG)、地理位置(GPE)等实体
+            entities = []
+            for ent in doc.ents:
+                if ent.label_ in ["PERSON", "ORG", "GPE"]:  # 人名、组织、地理位置
+                    entities.append(ent.text.strip())
+            
+            # 去重并保持顺序
+            seen = set()
+            unique_entities = []
+            for ent in entities:
+                if ent.lower() not in seen:
+                    seen.add(ent.lower())
+                    unique_entities.append(ent)
+            
+            return unique_entities
+        except Exception as e:
+            self.logger.warning("实体提取失败: %s", e)
+            return []
+    
+    def _generate_long_term_profiles(self, user_id: str, timestamp: Optional[str]) -> None:
+        """
+        Generate or update long-term profile memories (L3) for key entities after a session ends.
+        
+        Logic:
+        1. If no long-term profiles exist for this user -> Generate new profiles based on current session
+        2. If long-term profiles already exist -> Update them based on new session memories
+        """
+        try:
+            import json
+            import re
+            
+            # Get all memories for this user
+            all_memories_result = self.memory.get_all(user_id=user_id, limit=1000)
+            
+            if not all_memories_result or not all_memories_result.get("results"):
+                self.logger.debug("No memories found for user %s, skipping long-term profile processing.", user_id)
+                return
+            
+            memories = all_memories_result["results"]
+            # Separate long-term profiles from other memories
+            existing_profiles = []
+            session_memories = []
+            
+            for mem in memories:
+                memory_text = mem.get("memory", "")
+                memory_metadata = mem.get("metadata", {})
+                
+                # Check if it's a long-term profile
+                if memory_text.startswith("[Long-term Profile]:") or memory_metadata.get("level") == "L3":
+                    existing_profiles.append({
+                        "id": mem.get("id"),
+                        "text": memory_text
+                    })
+                else:
+                    # Collect non-profile memories for processing
+                    session_memories.append(memory_text)
+            
+            if not session_memories:
+                self.logger.debug("No non-profile memories found for user %s, skipping long-term profile processing.", user_id)
+                return
+            
+            # Prepare memories text for LLM
+            memories_text = "\n".join([f"- {mem}" for mem in session_memories])
+            
+            # Extract entities from memories text to help LLM generate more comprehensive profiles
+            extracted_entities = self._extract_entities_from_text(memories_text)
+            
+            # Case 1: No existing profiles -> Generate new ones
+            if not existing_profiles:
+                self.logger.info("No existing long-term profiles found for user %s, generating new profiles.", user_id)
+                if extracted_entities:
+                    self.logger.info("Extracted %d entities: %s", len(extracted_entities), ", ".join(extracted_entities[:5]))
+                self._generate_new_profiles(user_id, timestamp, memories_text, extracted_entities)
+            
+            # Case 2: Existing profiles -> Update them
+            else:
+                self.logger.info("Found %d existing long-term profiles for user %s, updating them.", len(existing_profiles), user_id)
+                if extracted_entities:
+                    self.logger.info("Extracted %d entities: %s", len(extracted_entities), ", ".join(extracted_entities[:5]))
+                self._update_existing_profiles(user_id, timestamp, existing_profiles, memories_text, extracted_entities)
+                
+        except Exception as exc:
+            self.logger.warning("Long-term profile processing failed for %s: %s", user_id, exc)
+    
+    def _generate_new_profiles(self, user_id: str, timestamp: Optional[str], memories_text: str, extracted_entities: list = None) -> None:
+        """Generate new long-term profiles when none exist."""
+        try:
+            import json
+            import re
+            
+            from mem0.configs.prompts import LONG_TERM_PROFILE_GENERATION_PROMPT
+            
+            # Prepare entities information for prompt
+            entities_info = ""
+            if extracted_entities:
+                entities_info = f"\n\n## Key Entities Identified\nBased on entity extraction, the following key entities were found in the memories:\n" + "\n".join([f"- {ent}" for ent in extracted_entities[:20]]) + "\n\nPlease ensure you create profiles for these entities if they have sufficient information. This list is provided to help you identify all relevant entities and generate more comprehensive profiles."
+            
+            # Generate long-term profiles using LLM
+            prompt = LONG_TERM_PROFILE_GENERATION_PROMPT.format(memories=memories_text) + entities_info
+            
+            try:
+                response = self.memory.llm.generate_response(
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                )
+            except Exception as exc:
+                self.logger.warning("Long-term profile generation failed for %s: %s", user_id, exc)
+                return
+            
+            if not response:
+                return
+            
+            # Parse the response
+            try:
+                # Remove code blocks if present
+                response_clean = re.sub(r'```json\s*', '', response)
+                response_clean = re.sub(r'```\s*', '', response_clean).strip()
+                
+                profile_data = json.loads(response_clean)
+                profiles = profile_data.get("profiles", [])
+                
+                if not profiles:
+                    self.logger.debug("No long-term profiles generated for user %s", user_id)
+                    return
+                
+                # Store each profile as a separate memory
+                metadata = self._build_timestamp_metadata(timestamp)
+                metadata["long_term_profile"] = True
+                metadata["level"] = "L3"
+                
+                for profile_text in profiles:
+                    if not profile_text or not profile_text.strip():
+                        continue
+                    
+                    # Ensure the profile starts with the correct prefix
+                    if not profile_text.startswith("[Long-term Profile]:"):
+                        profile_text = f"[Long-term Profile]: {profile_text}"
+                    
+                    try:
+                        with self._memory_semaphore:
+                            # Use infer=False to directly add without going through fact extraction
+                            self.memory.add(
+                                profile_text,
+                                user_id=user_id,
+                                metadata=metadata,
+                                infer=False
+                            )
+                        self.logger.info("Stored new long-term profile for user %s: %s", user_id, profile_text[:100])
+                    except Exception as exc:
+                        self.logger.warning("Failed to store long-term profile '%s' for %s: %s", 
+                                          profile_text[:50], user_id, exc)
+                        
+            except json.JSONDecodeError as e:
+                self.logger.warning("Failed to parse long-term profile response for %s: %s. Response: %s", 
+                                  user_id, e, response[:200])
+            except Exception as exc:
+                self.logger.warning("Error processing new long-term profiles for %s: %s", user_id, exc)
+                
+        except Exception as exc:
+            self.logger.warning("Failed to generate new long-term profiles for %s: %s", user_id, exc)
+    
+    def _update_existing_profiles(self, user_id: str, timestamp: Optional[str], 
+                                  existing_profiles: list, new_memories_text: str, extracted_entities: list = None) -> None:
+        """Update existing long-term profiles based on new session memories."""
+        try:
+            import json
+            import re
+            
+            from mem0.configs.prompts import LONG_TERM_PROFILE_UPDATE_PROMPT
+            
+            # Prepare existing profiles text
+            existing_profiles_text = "\n".join([f"- {p['text']}" for p in existing_profiles])
+            
+            # Prepare entities information for prompt
+            entities_info = ""
+            if extracted_entities:
+                entities_info = f"\n\n## Key Entities Identified\nBased on entity extraction from new memories, the following key entities were found:\n" + "\n".join([f"- {ent}" for ent in extracted_entities[:20]]) + "\n\nPlease ensure you check if these entities need new profiles or updates to existing profiles. This list is provided to help you identify all relevant entities and generate more comprehensive updates."
+            
+            # Generate update prompt
+            prompt = LONG_TERM_PROFILE_UPDATE_PROMPT.format(
+                existing_profiles=existing_profiles_text,
+                new_memories=new_memories_text
+            ) + entities_info
+            
+            try:
+                response = self.memory.llm.generate_response(
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                )
+            except Exception as exc:
+                self.logger.warning("Long-term profile update failed for %s: %s", user_id, exc)
+                return
+            
+            if not response:
+                return
+            
+            # Parse the response
+            try:
+                # Remove code blocks if present
+                response_clean = re.sub(r'```json\s*', '', response)
+                response_clean = re.sub(r'```\s*', '', response_clean).strip()
+                
+                update_data = json.loads(response_clean)
+                updates = update_data.get("updates", [])
+                
+                if not updates:
+                    self.logger.debug("No updates needed for long-term profiles of user %s", user_id)
+                    return
+                
+                # Create a mapping from profile text to memory ID
+                profile_id_map = {p['text']: p['id'] for p in existing_profiles}
+                
+                # Update each profile that needs updating
+                metadata = self._build_timestamp_metadata(timestamp)
+                metadata["long_term_profile"] = True
+                metadata["level"] = "L3"
+                
+                for update_item in updates:
+                    original_text = update_item.get("id", "")
+                    updated_text = update_item.get("updated_text", "")
+                    should_update = update_item.get("should_update", False)
+                    
+                    if not should_update or not updated_text:
+                        continue
+                    
+                    # Find the memory ID
+                    memory_id = profile_id_map.get(original_text)
+                    if not memory_id:
+                        self.logger.warning("Could not find memory ID for profile: %s", original_text[:50])
+                        continue
+                    
+                    # Ensure the updated text has the correct prefix
+                    if not updated_text.startswith("[Long-term Profile]:"):
+                        updated_text = f"[Long-term Profile]: {updated_text}"
+                    
+                    try:
+                        with self._memory_semaphore:
+                            # Update the memory directly
+                            self.memory.update(memory_id=memory_id, data=updated_text)
+                        self.logger.info("Updated long-term profile for user %s: %s -> %s", 
+                                        user_id, original_text[:50], updated_text[:50])
+                    except Exception as exc:
+                        self.logger.warning("Failed to update long-term profile '%s' for %s: %s", 
+                                          original_text[:50], user_id, exc)
+                        
+            except json.JSONDecodeError as e:
+                self.logger.warning("Failed to parse long-term profile update response for %s: %s. Response: %s", 
+                                  user_id, e, response[:200])
+            except Exception as exc:
+                self.logger.warning("Error processing long-term profile updates for %s: %s", user_id, exc)
+                
+        except Exception as exc:
+            self.logger.warning("Failed to update existing long-term profiles for %s: %s", user_id, exc)
+
     def add_memories_for_speaker(
         self,
         speaker,
@@ -459,18 +759,20 @@ class MemoryADD:
         if self.fact_abstract_mode == "1":
             self._summarize_session_memory(speaker, messages, timestamp)
 
+        # Generate long-term profiles (L3 memory) after session ends
+        if self.long_term_profile_mode:
+            self._generate_long_term_profiles(speaker, timestamp)
+        else:
+            self.logger.info("Long-term profile mode is disabled, skipping long-term profile generation.")
+
         if self.add_mode == "2":  # 在第一轮结束后，按Batch=60整体再存一组
             for i in range(0, len(messages), 60): 
-                end_index = min(len(messages), i + 60)
-                try:
-                    self.add_memory(speaker, messages[i:end_index], metadata=self._build_timestamp_metadata(timestamp) or None)
-                except Exception as exc:
-                    self.logger.warning(f"Failed to add memory for batch 60: {exc}")
-                    self.add_memory(
-                        speaker,
-                        messages[i:end_index],
-                        metadata=self._build_timestamp_metadata(timestamp) or None,
-                    )
+                end_index = min(len(messages), i + 60) 
+                self.add_memory(
+                    speaker,
+                    messages[i:end_index],
+                    metadata=self._build_timestamp_metadata(timestamp) or None,
+                ) 
                 
     def process_conversation(self, item, idx, session_pbar=None, message_pbar=None):
 

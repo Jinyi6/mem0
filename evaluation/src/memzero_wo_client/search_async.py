@@ -237,6 +237,7 @@ class MemorySearch:
         embedder_config=None,
         search_llm_config=None,
         answer_llm_config=None,
+        enable_memory_summary=True,
     ):
         llm_config = llm_config or {}
         search_llm_config = search_llm_config or llm_config
@@ -331,6 +332,7 @@ class MemorySearch:
         self.search_method = self._normalize_mode(search_method)
         answer_mode = self._normalize_mode(answer_mode)
         self.answer_mode = answer_mode
+        self.enable_memory_summary = enable_memory_summary
         self.qdrant_path = qdrant_path
         self._max_parallelism_cap = max(1, min(os.cpu_count() * 2 or 8, 18))
         self.logger.info(
@@ -1982,6 +1984,70 @@ class MemorySearch:
         graph_memories = graph_payload
 
         return semantic_memories, graph_memories, search_duration
+
+    def summarize_memories(self, memories, speaker_id, question, max_retries=3):
+        """
+        对检索到的记忆列表进行摘要总结
+        
+        Args:
+            memories: 记忆列表，每个元素包含 memory, timestamp, score
+            speaker_id: 说话者ID
+            question: 当前问题
+            max_retries: 最大重试次数
+            
+        Returns:
+            summary: 摘要文本，如果失败则返回 None
+        """
+        if not memories or not self.enable_memory_summary:
+            return None
+        
+        # 构建记忆文本
+        memory_texts = []
+        for idx, mem in enumerate(memories, 1):
+            timestamp_str = f"[{mem.get('timestamp')}]" if mem.get('timestamp') else "[无时间戳]"
+            memory_texts.append(f"{idx}. {timestamp_str} {mem.get('memory', '')}")
+        
+        memories_text = "\n".join(memory_texts)
+
+        system_prompt = (
+            "You are a memory summarizer. Your task is to create a concise summary of the provided memories "
+            "that are relevant to answering a specific question. The summary should:\n"
+            "1. Consolidate related information from multiple memories\n"
+            "2. Preserve important details like names, dates, locations, and specific facts\n"
+            "3. Remove redundancy while maintaining completeness\n"
+            "4. Focus on information that directly relates to the question\n"
+            "5. Keep the summary concise (3-5 sentences or bullet points)\n"
+            "Output plain text only, no JSON format."
+        )
+        
+        user_prompt = (
+            f"Question: {question}\n\n" 
+            f"Memories for {speaker_id}:\n{memories_text}\n\n"
+            f"Please provide a concise summary of these memories relevant to the question."
+        )
+        
+        retries = 0
+        while retries < max_retries:
+            try:
+                response = self.search_client.chat.completions.create(
+                    model=self.llm_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=500
+                )
+                summary = response.choices[0].message.content.strip()
+                return summary if summary else None
+            except Exception as e:
+                retries += 1
+                if retries >= max_retries:
+                    self.logger.warning(f"Failed to summarize memories for {speaker_id} after {max_retries} retries: {e}")
+                    return None
+                time.sleep(1)
+        
+        return None
     
     def _log_llm_call(
         self,
@@ -3076,6 +3142,21 @@ class MemorySearch:
         response_time = 0.0
         total_search_time = speaker_1_memory_time + speaker_2_memory_time
 
+        # 获取原始记忆对象用于摘要（从Search方法中获取）
+        speaker_1_memories_raw, _, _ = self.search_memory(speaker_1_user_id, question, pbar=pbar)
+        speaker_2_memories_raw, _, _ = self.search_memory(speaker_2_user_id, question, pbar=pbar)
+
+        # 对记忆进行摘要总结（如果启用）
+        speaker_1_summary = None
+        speaker_2_summary = None
+        if self.enable_memory_summary:
+            speaker_1_summary = self.summarize_memories(
+                speaker_1_memories_raw, speaker_1_user_id.split("_")[0], question
+            )
+            speaker_2_summary = self.summarize_memories(
+                speaker_2_memories_raw, speaker_2_user_id.split("_")[0], question
+            )
+
         prompt_components = {
             "speaker_1_user_id": speaker_1_user_id.split("_")[0],
             "speaker_2_user_id": speaker_2_user_id.split("_")[0],
@@ -3096,6 +3177,22 @@ class MemorySearch:
             speaker_1_graph_memories=json.dumps(prompt_components["speaker_1_graph_memories"], indent=4),
             speaker_2_graph_memories=json.dumps(prompt_components["speaker_2_graph_memories"], indent=4),
         )
+        
+        # 将摘要添加到prompt中（与原始记忆一起使用）
+        if self.enable_memory_summary and speaker_1_summary and speaker_2_summary:
+            summary_section = f"""
+
+# Memory Summaries (for reference):
+## Summary for {speaker_1_user_id.split('_')[0]}:
+{speaker_1_summary}
+
+## Summary for {speaker_2_user_id.split('_')[0]}:
+{speaker_2_summary}
+
+---
+Note: The summaries above provide a condensed overview of the memories. Please refer to the detailed memories above for complete information.
+"""
+            answer_prompt = answer_prompt + summary_section
         response_content = None
         request_id = f"answer-q-{uuid.uuid4()}"
         # 细化重试逻辑
@@ -3167,6 +3264,8 @@ class MemorySearch:
             response_time,
             answer_prompt,
             total_search_time,
+            speaker_1_summary,
+            speaker_2_summary,
         )
 
     def process_question(self, val, speaker_a_user_id, speaker_b_user_id, idx, pbar=None):
@@ -3201,6 +3300,8 @@ class MemorySearch:
             response_time,
             answer_prompt,
             search_time_total,
+            speaker_1_summary,
+            speaker_2_summary,
         ) = self.answer_question(speaker_a_user_id, speaker_b_user_id, question, answer, category, pbar)
 
         result = {
@@ -3223,6 +3324,11 @@ class MemorySearch:
             "answer_prompt": answer_prompt,
             "search_time": search_time_total,
         }
+        
+        # 添加记忆摘要（如果启用）
+        if self.enable_memory_summary:
+            result["speaker_1_memory_summary"] = speaker_1_summary
+            result["speaker_2_memory_summary"] = speaker_2_summary
 
 
         self._record_result(idx, result)
