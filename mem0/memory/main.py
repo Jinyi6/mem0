@@ -145,7 +145,6 @@ def _build_filters_and_metadata(
 setup_config()
 # logger = logging.getLogger(__name__)
 
-
 class Memory(MemoryBase):
     def __init__(
         self,
@@ -567,13 +566,41 @@ Status: {status}
                 filters=filters,
             )
             for mem in existing_memories:
-                retrieved_old_memory.append({"id": mem.id, "text": mem.payload["data"]})
+                memory_text = mem.payload.get("data", "")
+                memory_metadata = {k: v for k, v in mem.payload.items() 
+                                 if k not in ["data", "hash", "created_at", "updated_at", 
+                                             "user_id", "agent_id", "run_id", "actor_id", "role"]}
+                
+                # Filter out long-term profiles (L3 memories)
+                # Check by text prefix or metadata markers
+                is_long_term_profile = (
+                    memory_text.startswith("[Long-term Profile]:") or
+                    memory_metadata.get("long_term_profile") is True or
+                    memory_metadata.get("level") == "L3"
+                )
+                
+                if not is_long_term_profile:
+                    retrieved_old_memory.append({"id": mem.id, "text": memory_text})
+                else:
+                    self.logger.debug(f"Filtered out long-term profile from memory decision: {memory_text[:50]}...")
 
         unique_data = {}
         for item in retrieved_old_memory:
             unique_data[item["id"]] = item
         retrieved_old_memory = list(unique_data.values())
-        self.logger.info(f"Total existing memories: {len(retrieved_old_memory)}")
+        
+        # Additional safety check: filter again by text content
+        filtered_retrieved_old_memory = [
+            item for item in retrieved_old_memory 
+            if not item.get("text", "").startswith("[Long-term Profile]:")
+        ]
+        
+        filtered_count = len(retrieved_old_memory) - len(filtered_retrieved_old_memory)
+        if filtered_count > 0:
+            self.logger.info(f"Filtered out {filtered_count} long-term profile(s) from memory decision stage.")
+        
+        retrieved_old_memory = filtered_retrieved_old_memory
+        self.logger.info(f"Total existing memories (after filtering long-term profiles): {len(retrieved_old_memory)}")
 
         # mapping UUIDs with integers for handling UUID hallucinations
         temp_uuid_mapping = {}
@@ -1595,7 +1622,27 @@ class AsyncMemory(MemoryBase):
                 limit=5,
                 filters=effective_filters,  # 'filters' is query_filters_for_inference
             )
-            return [{"id": mem.id, "text": mem.payload["data"]} for mem in existing_mems]
+            # Filter out long-term profiles during collection
+            filtered_mems = []
+            for mem in existing_mems:
+                memory_text = mem.payload.get("data", "")
+                memory_metadata = {k: v for k, v in mem.payload.items() 
+                                 if k not in ["data", "hash", "created_at", "updated_at", 
+                                             "user_id", "agent_id", "run_id", "actor_id", "role"]}
+                
+                # Filter out long-term profiles (L3 memories)
+                is_long_term_profile = (
+                    memory_text.startswith("[Long-term Profile]:") or
+                    memory_metadata.get("long_term_profile") is True or
+                    memory_metadata.get("level") == "L3"
+                )
+                
+                if not is_long_term_profile:
+                    filtered_mems.append({"id": mem.id, "text": memory_text})
+                else:
+                    self.logger.debug(f"Filtered out long-term profile from memory decision: {memory_text[:50]}...")
+            
+            return filtered_mems
 
         search_tasks = [process_fact_for_search(fact) for fact in new_retrieved_facts]
         search_results_list = await asyncio.gather(*search_tasks)
@@ -1606,6 +1653,18 @@ class AsyncMemory(MemoryBase):
         for item in retrieved_old_memory:
             unique_data[item["id"]] = item
         retrieved_old_memory = list(unique_data.values())
+        
+        # Additional safety check: filter again by text content
+        filtered_retrieved_old_memory = [
+            item for item in retrieved_old_memory 
+            if not item.get("text", "").startswith("[Long-term Profile]:")
+        ]
+        
+        filtered_count = len(retrieved_old_memory) - len(filtered_retrieved_old_memory)
+        if filtered_count > 0:
+            self.logger.info(f"Filtered out {filtered_count} long-term profile(s) from memory decision stage (async).")
+        
+        retrieved_old_memory = filtered_retrieved_old_memory
         self.logger.info(f"Total existing memories: {len(retrieved_old_memory)}")
         temp_uuid_mapping = {}
         for idx, item in enumerate(retrieved_old_memory):
