@@ -15,7 +15,23 @@ CONFIG_PATH = "config/mem0_qwen.json"
 #   [search_mode, answer_mode] or 4 values
 #   [fact_extraction_mode, memory_decision_mode, search_mode, answer_mode].
 # Populate this list before running the script.
-CONFIGS: list[list[str]] = []
+CONFIGS: list[list[str]] = [
+    ["0", "5"],
+    ["6", "5"],
+    ["6", "0"],
+    ["14.10", "0"],
+    ["14.10", "14.7"],
+    ["14.10", "14.8"],
+    ["14.10", "14.9"],
+    ["0", "14.9"],
+    ["6", "14.9"],
+    ["5", "14.9"],
+    ["14.9", "14.9"],
+    ["14.9", "14.8"],
+    ["14.9", "0"],
+    ["5", "5"],
+    ["0", "5"],
+]
 
 # Mapping for the two supported configuration shapes.
 _MODE_KEYS = {

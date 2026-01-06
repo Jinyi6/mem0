@@ -14,17 +14,17 @@
     "llm": {
       "model": "gpt-4o",
       "base_url": "https://openai.arnotho.com/v1",
-      "api_key": ""
+      "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul"
     },
     "search_llm": {
       "model": "gpt-4o",
       "base_url": "https://openai.arnotho.com/v1",
-      "api_key": ""
+      "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul"
     },
     "answer_llm": {
       "model": "gpt-4o",
       "base_url": "https://openai.arnotho.com/v1",
-      "api_key": ""
+      "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul"
     },
     "evaluator": {
       "model": "",

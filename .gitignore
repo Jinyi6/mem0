@@ -210,3 +210,8 @@ evaluation/src/memzero_wo_client/search_async4.py
 evaluation/src/memzero_wo_client/search_async_bak_1208.py
 .gitignore
 evaluation/src/memzero_wo_client/search_async5.py
+
+
+*.json
+*lock*
+*.sqlite

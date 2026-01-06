@@ -2745,6 +2745,100 @@ def get_update_memory_messages(retrieved_old_memory_dict, response_content, cust
     Do not return anything except the JSON format.
     """
 
+LONG_TERM_PROFILE_GENERATION_PROMPT = """You are a long-term profile summarizer. Your task is to analyze all memories from a session and generate concise long-term profiles for key entities (people) mentioned.
+
+## Task
+Given all memories from a session (including extracted facts and abstracted memories), identify the key entities (people) and create a simple, concise long-term profile for each entity.
+
+## Output Format
+Each profile must start with "[Long-term Profile]: " followed by the entity name and a brief description.
+
+Example format:
+- "[Long-term Profile]: Bob是一个热心肠的人，有两个孩子和一条狗"
+- "[Long-term Profile]: Alice is a software engineer who loves hiking and photography"
+
+## Guidelines
+1. Focus on stable, long-term characteristics (personality traits, family status, core interests, profession)
+2. Avoid temporary or session-specific details
+3. Keep descriptions concise (1-2 sentences max)
+4. Use the same language as the memories (Chinese or English)
+5. Only create profiles for entities that have sufficient information across multiple memories
+6. If multiple memories mention the same entity, synthesize them into one comprehensive profile
+
+## Input
+Below are all memories from this session:
+
+{memories}
+
+## Output
+Return a JSON object with a "profiles" key containing a list of profile strings. Each string must start with "[Long-term Profile]: ".
+
+Example:
+{{
+    "profiles": [
+        "[Long-term Profile]: Bob是一个热心肠的人，有两个孩子和一条狗",
+        "[Long-term Profile]: Alice is a software engineer who loves hiking"
+    ]
+}}
+
+If no entities have sufficient information for profiles, return:
+{{
+    "profiles": []
+}}
+
+Return only the JSON object, no additional text.
+"""
+
+LONG_TERM_PROFILE_UPDATE_PROMPT = """You are a long-term profile updater. Your task is to update existing long-term profiles based on new information from the current session.
+
+## Task
+Given existing long-term profiles and new memories from the current session, update each profile to incorporate new stable, long-term information while maintaining the profile's concise nature.
+
+## Important Rules
+1. Only update profiles with NEW stable, long-term information (personality traits, family status, core interests, profession changes)
+2. Do NOT add temporary or session-specific details
+3. Keep profiles concise (1-2 sentences max)
+4. Maintain the format: "[Long-term Profile]: EntityName description"
+5. If new information contradicts old information, update to reflect the current state
+6. If no significant new long-term information is available, keep the profile unchanged
+
+## Input Format
+Existing Profiles:
+{existing_profiles}
+
+New Session Memories:
+{new_memories}
+
+## Output Format
+Return a JSON object with an "updates" key containing a list of update objects. Each update object should have:
+- "id": the original profile text (for identification)
+- "updated_text": the updated profile text (must start with "[Long-term Profile]: ")
+- "should_update": boolean indicating if update is needed
+
+Example:
+{{
+    "updates": [
+        {{
+            "id": "[Long-term Profile]: Bob是一个热心肠的人，有两个孩子和一条狗",
+            "updated_text": "[Long-term Profile]: Bob是一个热心肠的人，有两个孩子和一条狗，最近开始学习编程",
+            "should_update": true
+        }},
+        {{
+            "id": "[Long-term Profile]: Alice is a software engineer who loves hiking",
+            "updated_text": "[Long-term Profile]: Alice is a software engineer who loves hiking",
+            "should_update": false
+        }}
+    ]
+}}
+
+If no updates are needed for any profile, return:
+{{
+    "updates": []
+}}
+
+Return only the JSON object, no additional text.
+"""
+
 FACT_RETRIEVAL_PROMPT_15_MSP = """
 [Role]
 You are a senior information‑extraction agent. Analyze the conversation and distill it into a structured, context‑rich list of “facts” about the speakers and explicitly mentioned people.

@@ -28,19 +28,18 @@ from tqdm import tqdm
 ANSWER_LLM_CONFIG = {
     "model": "Qwen/Qwen3-14B",
     "base_url": "https://api.siliconflow.cn/v1",
-    "api_key": "sk-rvhjpegrpizurzchtlsupycdrqnxgqutpeerkkrikjrzqcqn",
+    "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul",
 }
 
 EVALUATOR_LLM_CONFIG = {
-    "model": "Qwen/Qwen2.5-14B-Instruct",
+    "model": "Qwen/Qwen3-14B",
     "base_url": "https://api.siliconflow.cn/v1",
-    "api_key": "sk-rvhjpegrpizurzchtlsupycdrqnxgqutpeerkkrikjrzqcqn",
+    "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul",
 }
 
 # Provide the list of experiment result files (relative to this script or absolute paths).
 EXPERIMENT_RESULT_FILES = [
-    "exp_data/locomo10_7/locomo10_7_top_k_30_filter_False_graph_False_3_1_5_0_20251015_200201/"
-    "mem0_locomo10_7_results_top_30_filter_False_graph_False_20251015_200201_3_1_5_0.json",
+    "longmemeval_d0_model_Qwen_Qwen3_14B_top_k_30_filter_False_graph_False_0_0_0_0_20251031_015142/mem0_longmemeval_d0_results_top_30_filter_False_graph_False_20251031_015142_0_0_0_0.json"
 ]
 
 DEFAULT_ANSWER_MAX_WORKERS = 8
@@ -149,7 +148,7 @@ def _run_evaluation(
     evaluator_config: Dict[str, str],
     max_workers: int,
 ) -> Path:
-    metrics_path = answer_file.with_name(f"evaluation_metrics_{time_tag}_{model_tag}.json")
+    metrics_path = answer_file.with_name(f"evaluation_metrics_1126_new106.json")
     cmd = [
         sys.executable,
         str(EVAL_SCRIPT_PATH),
@@ -186,11 +185,21 @@ def _answer_experiment(
     with input_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
 
+    OLD_PREFIX = """You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories.\n\n    # CONTEXT:\n    You have access to memories from two speakers in a conversation. These memories contain \n    timestamped information that may be relevant to answering the question.\n\n    # INSTRUCTIONS:\n    1. Carefully analyze all provided memories from both speakers\n    2. Pay special attention to the timestamps to determine the answer\n    3. If the question asks about a specific event or fact, look for direct evidence in the memories\n    4. If the memories contain contradictory information, prioritize the most recent memory\n    5. If there is a question about time references (like \"last year\", \"two months ago\", etc.), \n       calculate the actual date based on the memory timestamp. For example, if a memory from \n       4 May 2022 mentions \"went to India last year,\" then the trip occurred in 2021.\n    6. Always convert relative time references to specific dates, months, or years. For example, \n       convert \"last year\" to \"2022\" or \"two months ago\" to \"March 2023\" based on the memory \n       timestamp. Ignore the reference while answering the question.\n    7. Focus only on the content of the memories from both speakers. Do not confuse character \n       names mentioned in memories with the actual users who created those memories.\n    8. The answer should be less than 5-6 words.\n    9. When you can\u2019t find evidence, the question may be an inference question. In that case, use common sense and reasoning to answer\u2014don\u2019t refuse.\n\n    # APPROACH (Think step by step):\n    1. First, examine all memories that contain information related to the question\n    2. Examine the timestamps and content of these memories carefully\n    3. Look for explicit mentions of dates, times, locations, or events that answer the question\n    4. If the answer requires calculation (e.g., converting relative time references), show your work\n    5. Formulate a precise, concise answer based solely on the evidence in the memories\n    6. Double-check that your answer directly addresses the question asked\n    7. Ensure your final answer is specific and avoids vague time references\n\n   
+    
+    """
+    NEW_PREFIX = """
+    You are an intelligent memory assistant tasked with retrieving accurate information from conversation memories.\n\n    # CONTEXT:\n    You have access to memories from two speakers in a conversation. These memories contain \n    timestamped information that may be relevant to answering the question.\n\n    # INSTRUCTIONS:\n    1. Carefully analyze all provided memories from both speakers\n    2. Pay special attention to the timestamps to determine the answer\n    3. If the question asks about a specific event or fact, look for direct evidence in the memories\n    4. If the memories contain contradictory information, prioritize the most recent memory\n    5. If there is a question about time references (like \"last year\", \"two months ago\", etc.), \n       calculate the actual date based on the memory timestamp. For example, if a memory from \n       4 May 2022 mentions \"went to India last year,\" then the trip occurred in 2021.\n    6. Always convert relative time references to specific dates, months, or years. For example, \n       convert \"last year\" to \"2022\" or \"two months ago\" to \"March 2023\" based on the memory \n       timestamp. Ignore the reference while answering the question.\n    7. Focus only on the content of the memories from both speakers. Do not confuse character \n       names mentioned in memories with the actual users who created those memories.\n    8. The answer should be less than 5-6 words.\n\n    # APPROACH (Think step by step):\n    1. First, examine all memories that contain information related to the question\n    2. Examine the timestamps and content of these memories carefully\n    3. Look for explicit mentions of dates, times, locations, or events that answer the question\n    4. If the answer requires calculation (e.g., converting relative time references), show your work\n    5. Formulate a precise, concise answer based solely on the evidence in the memories\n    6. Always center your judgment on the keywords in the question\n  7. Double-check that your answer directly addresses the question asked，if anything is missing, keep adding until the list is complete\n    8. Ensure your final answer is specific and avoids vague time references\n\n  
+
+    """
+
     tasks = []
     total_entries = 0
     for conv_key, idx, entry in _iter_questions(payload):
         total_entries += 1
         prompt = entry.get("answer_prompt")
+        prompt = NEW_PREFIX + prompt[len(OLD_PREFIX):]
+        # print(f"📊📊📊📊📊📊📊📊📊📊📊{prompt}")
         if not prompt:
             continue
         question = (entry.get("question") or "").strip().replace("\n", " ")

@@ -223,15 +223,14 @@ def main():
         help="If set, invoke run_experiments_msp.py instead of the default runner."
     )
     args = parser.parse_args()
-
     # 1. Load Configuration
     print(f"📄 Loading configuration from: {args.config}")
     with open(args.config, 'r') as f:
         config = json.load(f)
     setup_params = config["experiment_setup"]
     exp_params = config["exp_params"]
-    dataset_name = setup_params.get("dataset_name", "dataset")
-    technique_type = exp_params.get("technique_type", "mem0")
+    dataset_name = setup_params.get("dataset_name", "dataset") # locomo10_3_test
+    technique_type = exp_params.get("technique_type", "mem0") # mem0
 
     def safe_param_value(key, fallback="na"):
         """
@@ -409,8 +408,18 @@ def main():
             config.get("add_params", {}).get("add_mode")
             or exp_params.get("add_mode")
         )
+        fact_abstract_mode_value = (
+            config.get("add_params", {}).get("fact_abstract_mode")
+            or exp_params.get("fact_abstract_mode")
+            or "0"
+        )
+        long_term_profile_mode_value = (
+            config.get("add_params", {}).get("long_term_profile_mode")
+            or exp_params.get("long_term_profile_mode")
+            or "0"
+        )
         add_command = [
-            "python", "-u", runner_script,
+            "python",  "./run_experiments.py",
             "--method", "add",
             "--dataset_name", dataset_name,
             "--technique_type", technique_type,
@@ -419,7 +428,10 @@ def main():
             "--qdrant_path", qdrant_path,
             "--workspace_dir", workspace_dir,
             "--fact_extraction_mode", exp_params.get("fact_extraction_mode", "0"),
+            "--add_mode", exp_params.get("add_mode", "0"),
             "--memory_decision_mode", exp_params.get("memory_decision_mode", "0"),
+            "--fact_abstract_mode", str(fact_abstract_mode_value),
+            "--long_term_profile_mode", str(long_term_profile_mode_value),
             "--max_workers", str(add_max_workers),
             "--collection_name", collection_name,
         ]
@@ -448,8 +460,18 @@ def main():
             config.get("search_params", {}).get("max_workers")
             or exp_params.get("max_workers", 6)
         )
+        enable_memory_summary_value = (
+            config.get("search_params", {}).get("enable_memory_summary")
+            if config.get("search_params", {}).get("enable_memory_summary") is not None
+            else exp_params.get("enable_memory_summary", True)
+        )
+        # 确保布尔值转换为字符串
+        if isinstance(enable_memory_summary_value, bool):
+            enable_memory_summary_value = str(enable_memory_summary_value).lower()
+        else:
+            enable_memory_summary_value = str(enable_memory_summary_value).lower()
         search_command = [
-            "python", "-u", runner_script,
+            "python", "./run_experiments.py",
             "--method", "search",
             "--dataset_name", dataset_name,
             "--output_folder", workspace_dir,
@@ -461,6 +483,7 @@ def main():
             "--workspace_dir", workspace_dir,
             "--search_mode", exp_params.get("search_mode", "0"),
             "--answer_mode", exp_params.get("answer_mode", "0"),
+            "--enable_memory_summary", str(enable_memory_summary_value),
             "--max_workers", str(search_max_workers),
             "--collection_name", collection_name,
         ]

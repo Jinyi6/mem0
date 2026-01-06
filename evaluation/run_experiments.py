@@ -41,6 +41,7 @@ def main():
     # fact_extraction_mode
     parser.add_argument("--fact_extraction_mode", type=str, default="0", help="Fact extraction prompt mode")
     parser.add_argument("--memory_decision_mode", type=str, default="0", help="Memory decision prompt mode")
+    parser.add_argument("--fact_abstract_mode", type=str, default="0", help="Session-level abstraction mode")
     parser.add_argument("--search_mode", type=str, default="0", help="Search mode identifier")
     parser.add_argument("--answer_mode", type=str, default="0", help="Answer prompt mode")
     parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of worker threads")
@@ -59,6 +60,8 @@ def main():
     parser.add_argument("--embedder_dims", type=int, default=None, help="Output dimensionality for the embedder model")
     parser.add_argument("--batch_size", type=int, default=6, help="Batch size for MemoryADD ingestion")
     parser.add_argument("--add_mode", type=str, default="0", help="Memory ingestion overlap mode")
+    parser.add_argument("--long_term_profile_mode", type=str, default="0", help="Long-term profile generation mode (0=disabled, 1=enabled)")
+    parser.add_argument("--enable_memory_summary", type=lambda x: str(x).lower() in ("true", "1", "yes"), default=True, help="Enable memory summarization (True/False)")
 
     args = parser.parse_args()
 
@@ -164,7 +167,9 @@ def main():
                 qdrant_path=args.qdrant_path,
                 fact_extraction_mode=args.fact_extraction_mode,
                 memory_decision_mode=args.memory_decision_mode,
+                fact_abstract_mode=args.fact_abstract_mode,
                 add_mode=args.add_mode,
+                long_term_profile_mode=args.long_term_profile_mode,
                 collection_name=args.collection_name,
                 llm_config=add_llm_config,
                 embedder_config=embedder_config,
@@ -192,6 +197,7 @@ def main():
                 llm_config=search_llm_config,
                 answer_llm_config=answer_llm_config,
                 embedder_config=embedder_config,
+                enable_memory_summary=args.enable_memory_summary,
             )
             try:
                 memory_searcher.process_data_file(

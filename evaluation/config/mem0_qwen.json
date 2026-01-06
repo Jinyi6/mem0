@@ -18,28 +18,28 @@
     "llm": {
       "model": "Qwen/Qwen3-14B",
       "base_url": "https://api.siliconflow.cn/v1",
-      "api_key": ""
+      "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul"
     },
     "search_llm": {
-      "model": "",
-      "base_url": "",
-      "api_key": ""  
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul"
     },
     "answer_llm": {
-      "model": "",
-      "base_url": "",
-      "api_key": ""
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul"
     },
     "embedder": {
       "model": "Pro/BAAI/bge-m3",
       "base_url": "https://api.siliconflow.cn/v1",
-      "api_key": "",
+      "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul",
       "embedding_dims": 1024
     },
     "evaluator": {
-      "model": "",
-      "base_url": "",
-      "api_key": ""
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-kuyhjxvgozardrjxhcmahdydxyyassjgyyxuzviivnpnrrul"
     }
   },
   "eval_params": {
@@ -48,9 +48,12 @@
   "add_params": {
     "max_workers": 25,
     "batch_size": 32,
-    "add_mode": "0"
+    "add_mode": "0",
+    "fact_abstract_mode": "1",
+    "long_term_profile_mode": "1"
   },
   "search_params": {
-    "max_workers": 25
+    "max_workers": 25,
+    "enable_memory_summary": true
   }
 }
