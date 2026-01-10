@@ -1,7 +1,7 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo10_9",
+    "dataset_name": "locomo10_0",
     "existing_workspace_dir": ""
   },
   "exp_params": {
@@ -11,10 +11,10 @@
     "filter_memories": false,
     "is_graph": false,
     "figure_view": true,
-    "fact_extraction_mode": "14.9",
-    "memory_decision_mode": "14.7",
-    "search_mode": "0",
-    "answer_mode": "0",
+    "fact_extraction_mode": "15",
+    "memory_decision_mode": "14.9",
+    "search_mode": "14.27",
+    "answer_mode": "15",
     "llm": {
       "model": "Qwen/Qwen3-14B",
       "base_url": "https://api.siliconflow.cn/v1",
