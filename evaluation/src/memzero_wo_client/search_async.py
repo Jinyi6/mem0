@@ -4963,6 +4963,242 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             time_by_user.get(speaker_1_user_id, 0.0),
             time_by_user.get(speaker_2_user_id, 0.0),
         )
+
+    def _search_1430(self, speaker_1_user_id, speaker_2_user_id, question, top_k):
+        """
+        14.30: Use 14.27 as base (top 20), then optionally run one other scheme to
+        add up to 10 new non-duplicate memories.
+        """
+        base_k = 20
+        extra_limit = 10
+        extra_k = max(20, top_k)
+
+        s1_base, s2_base, t1_base, t2_base = self._search_1427(
+            speaker_1_user_id, speaker_2_user_id, question, base_k
+        )
+        s1_base = s1_base or []
+        s2_base = s2_base or []
+
+        def _mem_text(line: str) -> str:
+            if not line:
+                return ""
+            _, _, rest = line.partition(": ")
+            return (rest or line).strip()
+
+        def _mem_sig(line: str) -> str:
+            text = _mem_text(line)
+            if not text:
+                return ""
+            return re.sub(r"\s+", " ", text).strip().lower()
+
+        def _trim(text: str, limit: int = 220) -> str:
+            if text is None:
+                return ""
+            text = str(text)
+            if len(text) <= limit:
+                return text
+            return text[: limit - 3] + "..."
+
+        base_texts = [_mem_text(item) for item in (s1_base + s2_base) if item]
+
+        def _needs_more_heuristic() -> bool:
+            if len(base_texts) < 5:
+                return True
+            q_tokens = [t for t in re.findall(r"\b\w+\b", question.lower()) if len(t) > 2]
+            q_token_set = set(q_tokens)
+            mem_tokens = set(re.findall(r"\b\w+\b", " ".join(base_texts).lower()))
+            coverage = len(q_token_set & mem_tokens) / float(max(1, len(q_token_set)))
+            max_lex = max((self._lexical_score(question, t) for t in base_texts), default=0.0)
+            need_more = max_lex < 0.18 or coverage < 0.3
+
+            intent = self._intent_148(question)
+            if intent.get("is_time"):
+                time_hit = any(
+                    re.search(
+                        r"\b(20\d{2}|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|yesterday|today|tomorrow)\b",
+                        t.lower(),
+                    )
+                    for t in base_texts
+                )
+                if not time_hit:
+                    need_more = True
+            if intent.get("is_numeric"):
+                if not any(re.search(r"\d", t) for t in base_texts):
+                    need_more = True
+            return need_more
+
+        def _as_bool(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                low = value.strip().lower()
+                if low in {"true", "yes", "y", "1"}:
+                    return True
+                if low in {"false", "no", "n", "0"}:
+                    return False
+            return None
+
+        strategy_catalog = {
+            "14.26": "Type-aware high-recall; strong for time/count/attribute questions.",
+            "14.25": "High-recall hybrid; heavy query expansion and PRF for broad coverage.",
+            "14.23": "HyDE Lite expansion; good for synonyms/examples or vague terms.",
+            "14.22": "Reliable hybrid; mandatory lexical rescue and subject mismatch penalties.",
+            "14.21": "Multi-hop + gating; good for constraints/negation/complex queries.",
+            "14.20": "Multi-hop high recall; strong constraint handling but less gating.",
+            "14.10": "Keyword+PRF baseline; balanced but lighter recall.",
+            "14.8": "Intent-driven RRF hybrid; robust for time/numeric/subject signals.",
+            "14.7": "Timeline/graph; best for time sequence with subject+action.",
+            "14.6": "Time-targeted; strict on date markers when time intent.",
+            "14.5": "Noise-aware hybrid; conservative general fallback.",
+        }
+
+        def _llm_plan():
+            if not getattr(self, "llm", None):
+                return None
+            mem_lines = []
+            for idx, line in enumerate(s1_base):
+                mem_lines.append(f"A{idx + 1}. {_trim(line)}")
+            for idx, line in enumerate(s2_base):
+                mem_lines.append(f"B{idx + 1}. {_trim(line)}")
+            mem_block = "\n".join(mem_lines) if mem_lines else "(none)"
+            catalog_lines = "\n".join([f"- {k}: {v}" for k, v in strategy_catalog.items()])
+
+            prompt = f"""You are a retrieval assessor.
+Question: {question}
+
+Retrieved memories (top 20 per speaker):
+{mem_block}
+
+Strategy catalog (choose ONE, not 14.27):
+{catalog_lines}
+
+Return JSON only with this schema:
+{{
+  "sufficient": true/false,
+  "gaps": ["time"|"number"|"entity"|"location"|"list"|"causal"|"timeline"|"negation"|"preference"|"other"...],
+  "strategy": "14.xx"|"none",
+  "suggested_queries": ["..."],
+  "rationale": "short reason"
+}}
+Rules:
+- If sufficient, set strategy to "none".
+- If insufficient, choose exactly one strategy from the catalog (not 14.27)."""
+
+            try:
+                resp = self.safe_chat(
+                    model=self.llm_model,
+                    messages=[{"role": "system", "content": prompt}],
+                    temperature=0.2,
+                )
+            except Exception as exc:
+                print(f"⚠️ 14.30 LLM judge failed: {exc}")
+                return None
+            text = self._extract_llm_text(resp).strip()
+            match = re.search(r"\{.*\}", text, flags=re.S)
+            if not match:
+                return None
+            try:
+                data = json.loads(match.group(0))
+            except Exception:
+                return None
+            return data if isinstance(data, dict) else None
+
+        def _pick_from_gaps(gaps):
+            if not gaps:
+                return None
+            lowers = [str(g).lower() for g in gaps if g]
+            if any(g in {"timeline", "sequence", "order"} for g in lowers):
+                return "14.7"
+            if any(g in {"time", "date", "when"} for g in lowers):
+                return "14.26"
+            if any(g in {"number", "count", "numeric"} for g in lowers):
+                return "14.26"
+            if any(g in {"entity", "person", "name", "subject"} for g in lowers):
+                return "14.22"
+            if any(g in {"list", "examples", "synonym", "category"} for g in lowers):
+                return "14.23"
+            if any(g in {"negation", "constraint", "exclude", "multi-hop"} for g in lowers):
+                return "14.21"
+            return None
+
+        def _fallback_strategy():
+            intent = self._intent_148(question)
+            neg_terms, _, _ = self._extract_negative_terms(question)
+            if intent.get("is_time") and (intent.get("has_year") or intent.get("has_month")):
+                return "14.7"
+            if intent.get("is_time") or intent.get("is_numeric"):
+                return "14.26"
+            if neg_terms:
+                return "14.21"
+            if re.search(r"\b(list|lists|examples|which|what are|what kinds|types of|areas|items|people)\b", question.lower()):
+                return "14.23"
+            return "14.25"
+
+        plan = _llm_plan()
+        heuristic_need = _needs_more_heuristic()
+        need_more = heuristic_need
+        strategy = None
+
+        if plan:
+            sufficient = _as_bool(plan.get("sufficient"))
+            if sufficient is True and not heuristic_need:
+                return s1_base, s2_base, float(t1_base or 0.0), float(t2_base or 0.0)
+            if sufficient is False:
+                need_more = True
+            gaps = plan.get("gaps") or []
+            strategy = plan.get("strategy") if isinstance(plan.get("strategy"), str) else None
+            if strategy:
+                strategy = strategy.strip()
+            if (not strategy) or (strategy not in strategy_catalog):
+                strategy = _pick_from_gaps(gaps)
+
+        if not strategy:
+            strategy = _fallback_strategy()
+
+        if not need_more:
+            return s1_base, s2_base, float(t1_base or 0.0), float(t2_base or 0.0)
+
+        strategy_map = {
+            "14.26": self._search_1426,
+            "14.25": self._search_1425,
+            "14.23": self._search_1423,
+            "14.22": self._search_1422,
+            "14.21": self._search_1421,
+            "14.20": self._search_1420,
+            "14.10": self._search_1410,
+            "14.8": self._search_148,
+            "14.7": self._search_147,
+            "14.6": self._search_146,
+            "14.5": self._search_145,
+        }
+        search_fn = strategy_map.get(strategy)
+        if not search_fn:
+            return s1_base, s2_base, float(t1_base or 0.0), float(t2_base or 0.0)
+
+        s1_extra, s2_extra, t1_extra, t2_extra = search_fn(
+            speaker_1_user_id, speaker_2_user_id, question, extra_k
+        )
+
+        def _merge(base_list, extra_list):
+            combined = list(base_list)
+            seen = {_mem_sig(item) for item in combined if _mem_sig(item)}
+            added = 0
+            for item in (extra_list or []):
+                sig = _mem_sig(item)
+                if not sig or sig in seen:
+                    continue
+                combined.append(item)
+                seen.add(sig)
+                added += 1
+                if added >= extra_limit:
+                    break
+            return combined
+
+        merged_s1 = _merge(s1_base, s1_extra)
+        merged_s2 = _merge(s2_base, s2_extra)
+        total_t1 = float(t1_base or 0.0) + float(t1_extra or 0.0)
+        total_t2 = float(t2_base or 0.0) + float(t2_extra or 0.0)
+        return merged_s1, merged_s2, total_t1, total_t2
     
     def Search(self, speaker_1_user_id, speaker_2_user_id, question, search_method, top_k_rerank=15, pbar=None):
         """
@@ -5583,6 +5819,9 @@ Select up to {top_k} most relevant memory indices. Respond ONLY with indices in 
             return (s1, s2, None, None, t1, t2)
         elif search_method == "14.27":
             s1, s2, t1, t2 = self._search_1427(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
+            return (s1, s2, None, None, t1, t2)
+        elif search_method == "14.30":
+            s1, s2, t1, t2 = self._search_1430(speaker_1_user_id, speaker_2_user_id, question, top_k_rerank)
             return (s1, s2, None, None, t1, t2)
         elif search_method == "6":
             if not len(self.speaker_1_full_memories) or not len(self.speaker_2_full_memories):
