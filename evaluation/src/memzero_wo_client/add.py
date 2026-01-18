@@ -776,15 +776,6 @@ class MemoryADD:
             self._generate_long_term_profiles(speaker, timestamp)
         else:
             self.logger.info("Long-term profile mode is disabled, skipping long-term profile generation.")
-
-        if self.add_mode == "2":  # 在第一轮结束后，按Batch=60整体再存一组
-            for i in range(0, len(messages), 60): 
-                end_index = min(len(messages), i + 60) 
-                self.add_memory(
-                    speaker,
-                    messages[i:end_index],
-                    metadata=self._build_timestamp_metadata(timestamp) or None,
-                ) 
                 
     def process_conversation(self, item, idx, session_pbar=None, message_pbar=None):
 

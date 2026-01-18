@@ -11,10 +11,10 @@
     "filter_memories": false,
     "is_graph": false,
     "figure_view": true,
-    "fact_extraction_mode": "14",
-    "memory_decision_mode": "14",
-    "search_mode": "0",
-    "answer_mode": "146",
+    "fact_extraction_mode": "15",
+    "memory_decision_mode": "14.9",
+    "search_mode": "14.27",
+    "answer_mode": "15",
     "llm": {
       "model": "Qwen/Qwen3-14B",
       "base_url": "https://api.siliconflow.cn/v1",
@@ -47,10 +47,13 @@
   },
   "add_params": {
     "max_workers": 25,
-    "batch_size": 6,
-    "add_mode": "1"
+    "batch_size": 32,
+    "add_mode": "1",
+    "fact_abstract_mode": "1",
+    "long_term_profile_mode": "1"
   },
   "search_params": {
-    "max_workers": 25
+    "max_workers": 25,
+    "enable_memory_summary": true
   }
 }

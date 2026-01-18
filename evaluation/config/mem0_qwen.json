@@ -1,7 +1,7 @@
 {
   "experiment_setup": {
     "base_dir": "exp_data",
-    "dataset_name": "locomo10_0",
+    "dataset_name": "locomo10_4",
     "existing_workspace_dir": ""
   },
   "exp_params": {
