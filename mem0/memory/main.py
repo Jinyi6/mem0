@@ -34,6 +34,7 @@ from mem0.memory.storage import SQLiteManager
 from mem0.memory.utils import (
     get_fact_retrieval_messages,
     parse_messages,
+    parse_messages_v1217,
     parse_vision_messages,
     process_telemetry_filters,
     remove_code_blocks,
@@ -437,7 +438,7 @@ Status: {status}
         memory_decision_section_start = None
         request_id_2 = None
 
-        parsed_messages = parse_messages(messages)
+        parsed_messages = parse_messages_v1217(messages)
 
         if self.config.custom_fact_extraction_prompt:
             system_prompt = self.config.custom_fact_extraction_prompt
