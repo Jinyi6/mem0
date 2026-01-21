@@ -247,6 +247,8 @@ class MemoryADD:
                         message,
                         user_id=user_id,
                         metadata=metadata,
+                        fact_extraction_mode=self.fact_extraction_mode,
+                        memory_decision_mode=self.memory_decision_mode,
                         # Pass modes if supported by add, otherwise they are in config
                     )
                 return
@@ -261,6 +263,35 @@ class MemoryADD:
                     continue
                 self.logger.error("Request ID [%s] - Failed to add memory. Error: %s", request_id, exc)
                 raise
+
+    def add_memories_for_global_observer(
+        self,
+        user_id,
+        messages,
+        timestamp,
+        message_pbar=None,
+    ):
+        """
+        Add messages to the global observer memory in batches (message-count based),
+        matching the non-MSP ingestion semantics.
+
+        When add_mode == "1", batches overlap by 1 message.
+        """
+        overlap_mode = self.add_mode == "1"
+        for i in range(0, len(messages), self.batch_size):
+            start_index = i
+            if overlap_mode and i > 0:
+                start_index = max(0, i - 1)
+            end_index = min(len(messages), i + self.batch_size)
+            batch_messages = messages[start_index:end_index]
+            metadata = self._build_timestamp_metadata(timestamp)
+            self.add_memory(user_id, batch_messages, metadata=metadata or None)
+            if message_pbar:
+                increment = len(batch_messages)
+                if overlap_mode and i > 0:
+                    increment = max(0, increment - 1)
+                with self._pbar_lock:
+                    message_pbar.update(increment)
 
     def process_conversation(self, item, idx, session_pbar=None, message_pbar=None):
         max_retries = 2
@@ -292,39 +323,26 @@ class MemoryADD:
                     if not isinstance(chats, list):
                         continue
 
-                    # Construct transcript with "Speaker: Content" format
-                    transcript_lines = []
-                    for chat in chats:
-                        context = chat['text']
-                        speaker = chat.get('speaker', 'Unknown')
-                        
-                        if self.figure_view:
-                            if "img_url" in chat and "blip_caption" in chat:
-                                context += f" [Image: {chat['img_url']}] with caption: {chat['blip_caption']}"
-                        
-                        transcript_lines.append(f"{speaker}: {context}")
-
-                    transcript = "\n".join(transcript_lines)
-                    
-                    # Add as a single message block representing the session
-                    # We wrap it in a list of dicts to simulate a "user" message containing the transcript
-                    # or just pass the string. mem0.add handles string string.
-                    # To be safe and explicit about the "conversation" aspect, we pass it as a user message.
-                    message_payload = [{"role": "user", "content": transcript}]
-
-                    self.add_memory(
-                        global_user_id,
-                        message_payload,
-                        metadata=self._build_timestamp_metadata(timestamp)
-                    )
-
                     sessions_processed += 1
                     if session_pbar:
                         with self._pbar_lock:
                             session_pbar.update(1)
-                    if message_pbar:
-                        with self._pbar_lock:
-                            message_pbar.update(len(chats))
+
+                    messages = []
+                    for chat in chats:
+                        context = chat["text"]
+                        speaker = chat.get("speaker", "Unknown")
+                        if self.figure_view:
+                            if "img_url" in chat and "blip_caption" in chat:
+                                context += f" [Image: {chat['img_url']}] with caption: {chat['blip_caption']}"
+                        messages.append({"role": "user", "content": f"{speaker}: {context}"})
+
+                    self.add_memories_for_global_observer(
+                        global_user_id,
+                        messages,
+                        timestamp,
+                        message_pbar,
+                    )
 
                 self.logger.info(f"Conversation {idx} processed successfully.")
                 return

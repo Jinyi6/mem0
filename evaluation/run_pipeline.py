@@ -222,6 +222,16 @@ def main():
         action="store_true",
         help="If set, invoke run_experiments_msp.py instead of the default runner."
     )
+    parser.add_argument(
+        "--metrics",
+        type=str,
+        nargs="+",
+        default=None,
+        help=(
+            "Metrics to pass to evals.py (e.g. llm f1 bleu mcq all). "
+            "If omitted, evals.py uses its own default."
+        ),
+    )
     args = parser.parse_args()
 
     # 1. Load Configuration
@@ -497,12 +507,24 @@ def main():
 
     if args.start_from_step <= 3:
         print("\n" + "#"*25 + " STEP 3: EVALUATE RESULTS " + "#"*25, flush=True)
+        eval_params = config.get("eval_params") or {}
+        metrics_to_use = args.metrics
+        if metrics_to_use is None:
+            configured_metrics = eval_params.get("metrics")
+            if isinstance(configured_metrics, list):
+                metrics_to_use = [str(metric) for metric in configured_metrics if str(metric).strip()]
+            elif isinstance(configured_metrics, str) and configured_metrics.strip():
+                metrics_to_use = [token for token in re.split(r"[,\s]+", configured_metrics.strip()) if token]
+
         eval_command = [
             "python", "-u", "./evals.py",
             "--input_file", search_results_path,
             "--output_file", eval_metrics_path,
-            "--max_workers", str(config['eval_params']['max_workers'])
+            "--max_workers", str(eval_params["max_workers"]),
+            "--dataset_name", dataset_name,
         ]
+        if metrics_to_use:
+            eval_command.extend(["--metrics", *metrics_to_use])
         append_arg(eval_command, "--evaluator_model", evaluator_model)
         append_arg(eval_command, "--evaluator_base_url", evaluator_base_url)
         append_arg(eval_command, "--evaluator_api_key", evaluator_api_key)
@@ -533,3 +555,4 @@ if __name__ == "__main__":
     main()
 
 # nohup python run_pipeline.py --config ./config/default.json > pipeline.log 2>&1 &
+# nohup python run_pipeline.py --config ./config/default.json --use_msp_runner --metrics mcq > pipeline.log 2>&1 &
