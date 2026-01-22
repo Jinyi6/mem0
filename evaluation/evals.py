@@ -20,7 +20,6 @@ os.environ["LOCAL_MEM0_PATH"] = os.path.dirname(os.path.dirname(os.path.abspath(
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["MEM0_TELEMETRY"] = "False"
 
-from metrics.llm_judge_v5 import configure_evaluator, submit_llm_judge
 from utils.result_merger import merge_memory_and_scores, save_json_file
 
 DATASET_FIXED_PATH = Path(__file__).resolve().parent / "dataset" / "locomo10_fixed.json"
@@ -108,6 +107,7 @@ def _evaluate_candidates(
     
     f1_func = metric_helpers.get("f1")
     bleu_func = metric_helpers.get("bleu")
+    llm_submit = metric_helpers.get("llm_submit")
 
     if candidates is None or candidates == "" or candidates == [] or all(candidate == "" for candidate in candidates):
         metrics_summary: Dict[str, float] = {}
@@ -151,7 +151,9 @@ def _evaluate_candidates(
                 max_bleu1 = max(max_bleu1, bleu_score)
 
             if "llm" in enabled_metrics:
-                future = submit_llm_judge(question, candidate_str, prediction)
+                if not llm_submit:
+                    raise RuntimeError("llm metric enabled but LLM judge is unavailable (import failed).")
+                future = llm_submit(question, candidate_str, prediction)
                 llm_future_map[future] = (candidate_str, candidate_metrics)
         except Exception as exc:
             print(
@@ -211,61 +213,55 @@ def _evaluate_candidates(
 
 # --- 需求 3 新增: MCQ 解析与评估 ---
 
-def _extract_mcq_answers(text: str) -> Set[str]:
+def _parse_mcq_pred_answers(text: str) -> Tuple[Set[str], bool]:
     """
-    鲁棒地从文本中提取 MCQ 选项。
-    支持格式: <answer>A</answer>, A</answer>, [A], (A), 纯字母 A, A,B 等。
+    从文本中提取 MCQ 选项（只支持两种格式）：
+    - (A) / (b) ...
+    - [A] / [b] ...
+
+    返回: (options_set, malformed)
+    - options_set: 提取到的选项字母集合（统一为大写），未提取到则为空集合
+    - malformed: 是否检测到不允许的紧邻形式，如 (A)(B) 或 [A][B]（直接判错）
     """
     text = str(text).strip()
-    
-    # 1. 尝试从 <answer>...</answer> 中提取
-    match_tag = re.search(r'<answer>(.*?)</answer>', text, re.IGNORECASE | re.DOTALL)
-    if match_tag:
-        content = match_tag.group(1).strip()
-    else:
-        # 尝试 broken tag A</answer>
-        match_end = re.search(r'(.*?)</answer>', text, re.IGNORECASE | re.DOTALL)
-        if match_end:
-             # 取最后一行的内容，或者最后几个字符，假设是 broken tag
-             content = match_end.group(1).strip()
-             # 如果内容很长，可能包含了推理过程，尝试只取最后一部分
-             if len(content) > 20: 
-                 # 启发式：取最后5个字符看看有没有选项
-                 content_suffix = content[-5:]
-                 if re.search(r'[A-F]', content_suffix, re.IGNORECASE):
-                     content = content_suffix
-                 else:
-                     pass # 还是用全文吧
-        else:
-            content = text
 
-    # 将 content 转大写
-    content_upper = content.upper()
+    # 额外支持：如果模型输出“有且只有字母”，且长度 < 6，则视为选项输出。
+    # 例如：A / ab / ABCD（会解析成对应字母集合，统一转大写）。
+    # 注意：这里只接受 A-F（与选择题选项范围一致）。
+    if re.fullmatch(r"[A-Fa-f]{1,5}", text):
+        return {ch.upper() for ch in text}, False
 
-    # 提取 A-F (假设选项在 A-F 之间)
-    # 优先匹配括号模式 [A], (A)
-    # re.findall 返回所有非重叠匹配
-    
-    # 模式1: 被括号包围的单个字母
-    bracketed = re.findall(r'[\[\(]([A-F])[\]\)]', content_upper)
-    if bracketed:
-        return set(bracketed)
-        
-    # 模式2: 也就是用户可能直接输出 A, B 或者 A B
-    # 为了避免匹配单词中的 A (如 "A cat"), 我们使用单词边界
-    # 并且通常 MCQ 答案很短。如果 content 主要是 "Option A", "Truth is B"
-    
-    matches = re.findall(r'\b([A-F])\b', content_upper)
-    
-    # 这里有个风险： "I select A because B is wrong." -> {'A', 'B'}
-    # 但由于我们之前已经截取了 <answer> 标签或者 Final Answer 之后的内容，风险较小。
-    # 另外增加一个启发式：如果提取出的字母过多，只取第一个？对于多选这不适用。
-    # 考虑到 Eval 通常是 0/1 分，我们要求完全匹配。如果是 "A because B" 导致提取了 AB，那这也是模型输出不够规范的错。
-    
-    if matches:
-        return set(matches)
-        
-    return set()
+    # 不允许紧邻形式："(A)(B)" 或 "[A][B]"（无分隔符）
+    if re.search(r"\([A-Fa-f]\)\([A-Fa-f]\)", text) or re.search(r"\[[A-Fa-f]\]\[[A-Fa-f]\]", text):
+        return set(), True
+
+    token_re = re.compile(r"\(([A-Fa-f])\)|\[([A-Fa-f])\]")
+    options: Set[str] = set()
+    for match in token_re.finditer(text):
+        letter = match.group(1) or match.group(2)
+        if letter:
+            options.add(letter.upper())
+
+    return options, False
+
+def _parse_mcq_gt_answers(text: str) -> Set[str]:
+    """
+    解析 Ground Truth 的 MCQ 答案。
+
+    兼容两类输入：
+    - 裸字母: "A" / "c"
+    - 括号字母: "(A)" / "[c]"（会复用 pred 的解析规则，但忽略 malformed 标记）
+    """
+    raw = str(text).strip()
+    if not raw:
+        return set()
+
+    # 纯字母（单选或多选：逗号/空格分隔），且不得包含其他字符
+    if re.fullmatch(r"[A-Fa-f](?:[,\s]+[A-Fa-f])*", raw):
+        return {token.upper() for token in re.split(r"[,\s]+", raw) if token}
+
+    extracted, _malformed = _parse_mcq_pred_answers(raw)
+    return extracted
 
 def _is_likely_mcq_gt(candidates: List[str]) -> bool:
     """
@@ -276,12 +272,8 @@ def _is_likely_mcq_gt(candidates: List[str]) -> bool:
     # 检查所有候选答案能否被解析为选项集合，并且不为空
     valid = True
     for c in candidates:
-        extracted = _extract_mcq_answers(str(c))
+        extracted = _parse_mcq_gt_answers(str(c))
         if not extracted:
-            valid = False
-            break
-        # 还要防止它是普通文本碰巧含有 A/B。通常 GT 是很干净的 "A" 或 "(A)"
-        if len(str(c).strip()) > 10: # 如果 GT 很长，大概率不是纯选项
             valid = False
             break
     return valid
@@ -386,55 +378,53 @@ def process_single_item(
     category = str(item["category"])
     question = str(item["question"])
 
-    # 逻辑修改: 判断是否进行 MCQ 评估
-    # 条件: 1. "mcq" 在 enabled_metrics 中
-    #      2. Ground Truth 看起来像 MCQ
-    
-    do_mcq = "mcq" in enabled_metrics and _is_likely_mcq_gt(answer_candidates)
-    
     metrics_summary = {}
     best_answer = ""
-    
-    if do_mcq:
-        # --- MCQ 评估路径 ---
-        pred_options = _extract_mcq_answers(pred_answer)
-        
-        # 对比每个 candidate (只要匹配中一个 candidate就算对)
-        is_correct = False
-        for cand in answer_candidates:
-            gt_options = _extract_mcq_answers(str(cand))
-            if gt_options and pred_options == gt_options:
-                is_correct = True
-                best_answer = str(cand)
-                break
-        
-        mcq_score = 1.0 if is_correct else 0.0
-        metrics_summary["mcq_score"] = mcq_score
-        
-        if not best_answer:
-             best_answer = str(answer_candidates[0]) if answer_candidates else ""
 
-    else:
-        # --- 原有评估路径 (LLM, F1, BLEU) ---
-        if any(m in enabled_metrics for m in ["llm", "f1", "bleu"]):
-            try:
-                best_answer, metrics_res = _evaluate_candidates(
-                    question,
-                    pred_answer,
-                    answer_candidates,
-                    enabled_metrics,
-                    metric_helpers,
-                )
-                metrics_summary.update(metrics_res)
-            except Exception as exc:
-                print(
-                    f"❌ Failed to evaluate question '{question[:80]}...' due to: {exc}. "
-                    f"Candidates: {answer_candidates}"
-                , flush=True)
-                raise
-        else:
-            # 既不是 MCQ 又没开启其他指标
+    # --- MCQ 评估路径（只要启用了 mcq 就计算 mcq_score） ---
+    if "mcq" in enabled_metrics:
+        pred_options, pred_malformed = _parse_mcq_pred_answers(pred_answer)
+        is_correct = False
+        matched_candidate = ""
+        if not pred_malformed:
+            for cand in answer_candidates:
+                gt_options = _parse_mcq_gt_answers(str(cand))
+                if not gt_options:
+                    continue
+                if pred_options == gt_options:
+                    is_correct = True
+                    matched_candidate = str(cand)
+                    break
+        metrics_summary["mcq_score"] = 1.0 if is_correct else 0.0
+        if matched_candidate:
+            best_answer = matched_candidate
+
+        # 若只启用 mcq，则不走其他指标（保持与用户预期一致）
+        if enabled_metrics == {"mcq"} and not best_answer:
             best_answer = str(answer_candidates[0]) if answer_candidates else ""
+
+    # --- 原有评估路径 (LLM, F1, BLEU) ---
+    if any(m in enabled_metrics for m in ["llm", "f1", "bleu"]):
+        try:
+            selected_answer, metrics_res = _evaluate_candidates(
+                question,
+                pred_answer,
+                answer_candidates,
+                enabled_metrics,
+                metric_helpers,
+            )
+            metrics_summary.update(metrics_res)
+            if not best_answer:
+                best_answer = selected_answer
+        except Exception as exc:
+            print(
+                f"❌ Failed to evaluate question '{question[:80]}...' due to: {exc}. "
+                f"Candidates: {answer_candidates}"
+            , flush=True)
+            raise
+
+    if not best_answer:
+        best_answer = str(answer_candidates[0]) if answer_candidates else ""
 
     # 返回处理结果字典
     result = {
@@ -463,7 +453,7 @@ def main():
         type=str,
         nargs="+",
         default=["llm"],
-        help="Metrics to compute (choices: llm, f1, bleu, all). Default uses llm only.",
+        help="Metrics to compute (choices: llm, f1, bleu, mcq, all). Default uses llm only.",
     )
     parser.add_argument(
         "--combined_output_file",
@@ -474,6 +464,12 @@ def main():
     parser.add_argument("--evaluator_model", type=str, default=None, help="Model name for evaluator LLM")
     parser.add_argument("--evaluator_base_url", type=str, default=None, help="Base URL for evaluator LLM API")
     parser.add_argument("--evaluator_api_key", type=str, default=None, help="API key for evaluator LLM provider")
+    parser.add_argument(
+        "--dataset_name",
+        type=str,
+        default=None,
+        help="Optional dataset name. When it contains 'locomo', enables legacy answer_fixed backfill.",
+    )
 
     args = parser.parse_args()
 
@@ -505,11 +501,20 @@ def main():
         metric_helpers["bleu"] = _calculate_bleu_scores
 
     if "llm" in enabled_metrics:
+        try:
+            from metrics.llm_judge_v5 import configure_evaluator, submit_llm_judge
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to import LLM judge dependencies (required when using --metrics llm). "
+                "Either install missing dependencies or drop 'llm' from --metrics."
+            ) from exc
+
         configure_evaluator(
             model=args.evaluator_model,
             base_url=args.evaluator_base_url,
             api_key=args.evaluator_api_key,
         )
+        metric_helpers["llm_submit"] = submit_llm_judge
     else:
         print("Skipping LLM evaluator configuration (llm metric disabled).", flush=True)
 
@@ -534,8 +539,11 @@ def main():
         if needs_answer_fixed:
             break
 
-    if needs_answer_fixed:
-        print("🔄 Detected legacy evaluation file without 'answer_fixed'. Enriching from fixed dataset...")
+    dataset_name_lower = (args.dataset_name or "").lower()
+    is_locomo_dataset = "locomo" in dataset_name_lower
+
+    if needs_answer_fixed and is_locomo_dataset:
+        print("🔄 Detected legacy locomo evaluation file without 'answer_fixed'. Enriching from fixed dataset...")
         answer_lookup = load_answer_lookup(DATASET_FIXED_PATH)
         missing_questions = set()
         for items in data.values():

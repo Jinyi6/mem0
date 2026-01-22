@@ -1626,7 +1626,7 @@ Top indices:"""
     def _search_1427_time_hint(self, text):
         return bool(re.search(r"\b20\d{2}\b", text or ""))
 
-    def search(self, user_id, question, search_method, top_k_rerank=15, pbar=None):
+    def search(self, user_id, question, search_method, top_k_rerank=30, pbar=None):
         search_method = str(search_method)
         if search_method == "5" or search_method == "14.5":
             return self._search_5(user_id, question, top_k_rerank)
@@ -1641,7 +1641,7 @@ Top indices:"""
 
     def answer_question(self, global_user_id, question, answer, category, pbar=None, max_retries=5):
         memories, graph_memories, search_time = self.search(
-            global_user_id, question, self.search_method, pbar=pbar
+            global_user_id, question, self.search_method, top_k_rerank=self.top_k, pbar=pbar
         )
         
         if self.answer_mode == "15":
