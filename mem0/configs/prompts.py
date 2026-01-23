@@ -1183,6 +1183,7 @@ P6 Time Rules (strict):
    - Vague time (“recently”, “later today”) → keep wording and append “(vague time expression: '<phrase>')”.
 P7 Image Facts: If an image is present, append “; image: <URL>; title: <text>”.
 P8 Boundaries: Ignore chit-chat/greetings unless factual. Preserve speaker attributions; for non-user statements, prefix “X said/claims …”. Keep speculation labeled.
+P9 Keyword Attention: The input conversation may include "[Detected Keywords: ...]" tags. Use these keywords as strong hints for important topics, people, or objects that should be included in the facts. However, do not treat the tags themselves as spoken dialogue.
 
 [Format]
 - Each list element is a standalone, complete statement. Add parenthetical clarifications as needed. Append image notes with “; image: …; title: …”.

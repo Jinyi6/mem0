@@ -20,6 +20,27 @@ def parse_messages(messages):
     return response
 
 
+def parse_messages_v1217(messages):
+    parsed_lines = []
+    for msg in messages:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        keywords = msg.get("keywords", [])
+        
+        # 使用XML标签
+        if keywords:
+            keywords_str = ", ".join(keywords)
+            line = f"{role}: {content}\n   [Detected Keywords: {keywords_str}]"
+        else:
+            line = f"{role}: {content}"
+        
+        parsed_lines.append(line)
+
+    parsed_messages = "\n".join(parsed_lines)
+
+    return parsed_messages
+
+
 def format_entities(entities):
     if not entities:
         return ""

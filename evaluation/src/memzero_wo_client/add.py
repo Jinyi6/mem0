@@ -9,6 +9,11 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 import traceback
 
+
+import spacy
+
+
+
 from dotenv import load_dotenv
 from tqdm import tqdm
 from src.utils import compute_dataset_stats, stream_normalized_dataset
@@ -35,6 +40,76 @@ model_name = os.getenv("BASE_MODEL", "Qwen/Qwen3-14B")
 DEFAULT_EMBEDDER_MODEL = "Pro/BAAI/bge-m3"
 DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
 
+try:
+    from keybert import KeyBERT
+    KEYBERT_AVAILABLE = True
+except ImportError:
+    KEYBERT_AVAILABLE = False
+    print("⚠️ keybert not installed. Will use fallback keyword extraction.")
+
+
+_KEYBERT_MODEL = None
+_KEYBERT_LOCK = threading.Lock()
+_SPACY_MODEL = None
+_SPACY_LOCK = threading.Lock()
+
+
+def get_keybert_model():
+    """获取全局 KeyBERT 单例，线程安全"""
+    global _KEYBERT_MODEL
+    if _KEYBERT_MODEL is None:
+        with _KEYBERT_LOCK:
+            if _KEYBERT_MODEL is None:  # Double-check locking
+                if KEYBERT_AVAILABLE:
+                    print("📥 首次加载 KeyBERT 模型（只需一次）...")
+                    try:
+                        # 🔥 配置 HuggingFace Hub 使用镜像站
+                        import huggingface_hub
+                        # 设置镜像端点
+                        huggingface_hub.constants.HUGGINGFACE_CO_URL_TEMPLATE = "https://hf-mirror.com/{repo_id}/resolve/{revision}/{filename}"
+                        huggingface_hub.constants.HUGGINGFACE_CO_URL_HOME = "https://hf-mirror.com"
+                        
+                        # 使用默认模型（会使用代理下载或从缓存加载）
+                        _KEYBERT_MODEL = KeyBERT()
+                        print("✅ KeyBERT 模型加载成功！")
+
+                    except Exception as e:
+                        print(f"❌ KeyBERT 加载失败: {e}")
+                        _KEYBERT_MODEL = False  # 标记为失败，避免重复尝试
+    return _KEYBERT_MODEL if _KEYBERT_MODEL is not False else None
+
+def get_spacy_model():
+    """获取全局 SpaCy 单例，线程安全"""
+    global _SPACY_MODEL
+    if _SPACY_MODEL is None:
+        with _SPACY_LOCK:
+            if _SPACY_MODEL is None:  # Double-check locking
+                print("📥 首次加载 SpaCy 模型（只需一次）...")
+                try:
+                    # en_core_web_trf 或 en_core_web_sm
+                    _SPACY_MODEL = spacy.load("en_core_web_trf", disable=["parser", "textcat"])
+                    print("✅ en_core_web_trf 模型加载成功！")
+                except OSError as e:
+                    print(f"❌ 未找到 SpaCy 模型: {e}，正在尝试下载...")
+                    try:
+                        from spacy.cli import download
+                        download("en_core_web_trf")
+                        _SPACY_MODEL = spacy.load("en_core_web_trf", disable=["parser", "textcat"])
+                        print("✅ en_core_web_trf 模型下载并加载成功！")
+                    except Exception as download_error:
+                        print(f"❌ SpaCy 模型下载失败: {download_error}")
+                        # 回退到小型模型
+                        try:
+                            print("🔄 尝试回退到 en_core_web_sm 模型...")
+                            _SPACY_MODEL = spacy.load("en_core_web_sm", disable=["parser", "textcat"])
+                            print("✅ en_core_web_sm 模型加载成功！")
+                        except Exception as fallback_error:
+                            print(f"❌ SpaCy 小型模型也加载失败: {fallback_error}")
+                            _SPACY_MODEL = False  # 标记为失败，避免重复尝试
+                except Exception as e:
+                    print(f"❌ SpaCy 模型加载失败: {e}")
+                    _SPACY_MODEL = False  # 标记为失败，避免重复尝试
+    return _SPACY_MODEL if _SPACY_MODEL is not False else None
 
 
 # Update custom instructions
@@ -284,6 +359,13 @@ class MemoryADD:
             logger=self.logger,
             shared_executor=self._io_executor,
         )
+
+        self._keybert_checked = False
+        self._keybert_model = None
+
+        self._spacy_checked = False
+        self._spacy_model = None
+
         # Then, set the logger attribute on the created instance
         self.memory.logger = self.logger
         self._ensure_collection_exists()
@@ -367,6 +449,18 @@ class MemoryADD:
             )
         return resolved
 
+    def _ensure_keybert_model(self):
+        if not self._keybert_checked:
+            self._keybert_model = get_keybert_model()
+            self._keybert_checked = True
+        return self._keybert_model
+
+    def _ensure_spacy_model(self):
+        if not self._spacy_checked:
+            self._spacy_model = get_spacy_model()
+            self._spacy_checked = True
+        return self._spacy_model
+
     def add_memory(self, user_id, message, metadata, retries=2):
         request_id = f"add-mem-{uuid.uuid4()}"
         max_attempts = retries + 1
@@ -413,16 +507,78 @@ class MemoryADD:
         update_progress=True,
     ):
         overlap_mode = self.add_mode == "1"
+
+        # 1. Load Spacy Model
+        spacy_model = self._ensure_spacy_model()
+
+        # 2. Define Labels(NER + POS)
+        NER_LABELS = {
+            "PERSON",      # People, including fictional.
+            "NORP",        # Nationalities or religious or political groups.
+            "FAC",         # Buildings, airports, highways, bridges, etc.
+            "ORG",         # Companies, agencies, institutions, etc.
+            "GPE",         # Countries, cities, states.
+            "LOC",         # Non-GPE locations, mountain ranges, bodies of water.
+            "PRODUCT",     # Objects, vehicles, foods, etc. (Not services.)
+            "EVENT",       # Named hurricanes, battles, wars, sports events, etc.
+            "WORK_OF_ART", # Titles of books, songs, etc.
+            "LAW",         # Named documents made into laws.
+            "LANGUAGE",    # Any named language.
+            "DATE",        # Absolute or relative dates or periods.
+            "TIME",        # Times smaller than a day.
+            "PERCENT",     # Percentage, including ”%“.
+            "MONEY",       # Monetary values, including unit.
+            "QUANTITY",    # Measurements, as of weight or distance.
+            "ORDINAL",     # “first”, “second”, etc.
+            "CARDINAL",    # Numerals that do not fall under another type.
+        }
+        POS_LABELS = {"ADJ", "NOUN", "PROPN", "VERB"}
+
         for i in range(0, len(messages), self.batch_size):
             start_index = i
             if overlap_mode and i > 0:
                 start_index = max(0, i - 1)
             end_index = min(len(messages), i + self.batch_size)
             batch_messages = messages[start_index:end_index]
+
+            # 3. Batch Processing with nlp.pipe
+            processed_batch_messages = []
+            contents = [msg.get("content", "") for msg in batch_messages]
+
+            docs = spacy_model.pipe(contents)
+
+            for msg, doc in zip(batch_messages, docs):
+                msg_copy = msg.copy()
+                keywords = set()
+
+                if msg.get("content"):
+                    try:
+                        # --- 策略 A: 词性筛选 (POS) ---
+                        for token in doc:
+                            if (token.pos_ in POS_LABELS) and (not token.is_stop) and (not token.is_punct):
+                                keywords.add(token.text)
+
+                        # --- 策略 B: 实体补充 (NER) ---
+                        for ent in doc.ents:
+                            if ent.label_ in NER_LABELS:
+                                keywords.add(ent.text)
+
+                    except Exception as e:
+                        self.logger.warning(f"SpaCy processing failed: {e}")
+                        msg_copy["keywords"] = []
+
+                    msg_copy["keywords"] = sorted(list(keywords))
+
+                else:
+                    msg_copy["keywords"] = []
+                
+                processed_batch_messages.append(msg_copy)
+
             metadata = self._build_timestamp_metadata(timestamp)
-            self.add_memory(speaker, batch_messages, metadata=metadata or None)
+            self.add_memory(speaker, processed_batch_messages, metadata=metadata or None)
+
             if message_pbar and update_progress:
-                increment = len(batch_messages)
+                increment = len(processed_batch_messages)
                 if overlap_mode and i > 0:
                     increment = max(0, increment - 1)
                 with self._pbar_lock:
