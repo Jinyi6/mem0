@@ -1176,7 +1176,7 @@ Status: {status}
         memories = self.vector_store.list(filters=filters)[0]
         for memory in memories:
             self._delete_memory(memory.id)
-        self.vector_store.reset()
+        # self.vector_store.reset()
 
         self.logger.info(f"Deleted {len(memories)} memories. (user_id={user_id}, agent_id={agent_id}, run_id={run_id})")
 
