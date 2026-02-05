@@ -43,6 +43,8 @@ evaluation/scripts/evaluate_old_results.py
 mem0_init_version
 evaluation/config/mem0_qwen_41.json
 t.py
+examples/元
+代码/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
