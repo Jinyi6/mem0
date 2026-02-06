@@ -651,7 +651,14 @@ def calculate_statistics(output_path, output_style):
     total = len(items)
     score_0 = sum(1 for item in items if item.get("rubric_score", item.get("score")) == 0)
     score_1 = sum(1 for item in items if item.get("rubric_score", item.get("score")) == 1)
-    
+    ratios = [
+        float(item.get("rubric_requirement_ratio", item.get("requirement_ratio", 0.0)) or 0.0)
+        for item in items
+    ]
+    ratio_mean = sum(ratios) / total if total > 0 else 0.0
+    ratio_zero = sum(1 for r in ratios if r == 0.0)
+    ratio_full = sum(1 for r in ratios if r == 1.0)
+
     log("\n📊 Final Statistics:")
     log(f"   Total samples: {total}")
     log(f"   Score 0: {score_0}")
@@ -660,6 +667,9 @@ def calculate_statistics(output_path, output_style):
     if total > 0:
         solving_rate = score_1 / total
         log(f"\n📈 Solving Rate: {solving_rate:.4f} ({score_1}/{total})")
+        log(f"📈 Mean rubric_requirement_ratio: {ratio_mean:.4f}")
+        log(f"   Fully wrong (ratio=0): {ratio_zero}")
+        log(f"   Fully satisfied (ratio=1): {ratio_full}")
     
     log("=" * 60)
 
