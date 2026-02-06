@@ -49,6 +49,7 @@ MAX_ANSWER_RETRIES = 8
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EVAL_SCRIPT_PATH = Path(__file__).resolve().with_name("evals.py")
+EVAL_RULE_SCRIPT_PATH = Path(__file__).resolve().with_name("eval_rule.py")
 
 os.environ.setdefault("LOCAL_MEM0_PATH", str(PROJECT_ROOT))
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -148,11 +149,15 @@ def _run_evaluation(
     time_tag: str,
     evaluator_config: Dict[str, str],
     max_workers: int,
+    metrics: List[str] | None,
 ) -> Path:
     metrics_path = answer_file.with_name(f"evaluation_metrics_{time_tag}_{model_tag}.json")
+    metrics_lower = [str(m).lower() for m in metrics] if metrics else []
+    use_rubric = "rubric" in metrics_lower
+    eval_script = EVAL_RULE_SCRIPT_PATH if use_rubric else EVAL_SCRIPT_PATH
     cmd = [
         sys.executable,
-        str(EVAL_SCRIPT_PATH),
+        str(eval_script),
         "--input_file",
         str(answer_file),
         "--output_file",
@@ -160,6 +165,8 @@ def _run_evaluation(
         "--max_workers",
         str(max_workers),
     ]
+    if (not use_rubric) and metrics_lower:
+        cmd.extend(["--metrics", *metrics_lower])
 
     evaluator_model = evaluator_config.get("model")
     evaluator_base_url = evaluator_config.get("base_url")
@@ -249,6 +256,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--answer_max_workers", type=int, default=DEFAULT_ANSWER_MAX_WORKERS)
     parser.add_argument("--eval_max_workers", type=int, default=DEFAULT_EVAL_MAX_WORKERS)
+    parser.add_argument(
+        "--metrics",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Metrics to compute (e.g. llm f1 bleu mcq rubric). Defaults to evals.py behavior.",
+    )
     return parser.parse_args()
 
 
@@ -291,6 +305,7 @@ def main() -> None:
                 time_tag=time_tag,
                 evaluator_config=EVALUATOR_LLM_CONFIG,
                 max_workers=args.eval_max_workers,
+                metrics=args.metrics,
             )
             print(f"📊 Evaluation metrics saved to: {metrics_path}")
         except subprocess.CalledProcessError as exc:

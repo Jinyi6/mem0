@@ -1,0 +1,56 @@
+{
+  "experiment_setup": {
+    "base_dir": "exp_data",
+    "dataset_name": "CL-bench_locomo_0_4k",
+    "existing_workspace_dir": ""
+  },
+  "exp_params": {
+    "technique_type": "mem0",
+    "mode": "no_client_async",
+    "top_k": 30,
+    "filter_memories": false,
+    "is_graph": false,
+    "figure_view": true,
+    "fact_extraction_mode": "15",
+    "memory_decision_mode": "14.9",
+    "search_mode": "14.27",
+    "answer_mode": "15",
+    "llm": {
+      "model": "Qwen/Qwen3-14B",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": ""
+    },
+    "search_llm": {
+      "model": "",
+      "base_url": "",
+      "api_key": ""
+    },
+    "answer_llm": {
+      "model": "",
+      "base_url": "",
+      "api_key": ""
+    },
+    "embedder": {
+      "model": "Pro/BAAI/bge-m3",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "",
+      "embedding_dims": 1024
+    },
+    "evaluator": {
+      "model": "",
+      "base_url": "",
+      "api_key": ""
+    }
+  },
+  "eval_params": {
+    "max_workers": 25
+  },
+  "add_params": {
+    "max_workers": 1,
+    "batch_size": 1,
+    "add_mode": "1"
+  },
+  "search_params": {
+    "max_workers": 20
+  }
+}

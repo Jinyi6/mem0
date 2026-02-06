@@ -228,7 +228,7 @@ def main():
         nargs="+",
         default=None,
         help=(
-            "Metrics to pass to evals.py (e.g. llm f1 bleu mcq all). "
+            "Metrics to pass to evaluation (e.g. llm f1 bleu mcq rubric all). "
             "If omitted, evals.py uses its own default."
         ),
     )
@@ -516,19 +516,41 @@ def main():
             elif isinstance(configured_metrics, str) and configured_metrics.strip():
                 metrics_to_use = [token for token in re.split(r"[,\s]+", configured_metrics.strip()) if token]
 
-        eval_command = [
-            "python", "-u", "./evals.py",
-            "--input_file", search_results_path,
-            "--output_file", eval_metrics_path,
-            "--max_workers", str(eval_params["max_workers"]),
-            "--dataset_name", dataset_name,
-        ]
-        if metrics_to_use:
-            eval_command.extend(["--metrics", *metrics_to_use])
-        append_arg(eval_command, "--evaluator_model", evaluator_model)
-        append_arg(eval_command, "--evaluator_base_url", evaluator_base_url)
-        append_arg(eval_command, "--evaluator_api_key", evaluator_api_key)
-        run_command(eval_command)
+        metrics_lower = [str(m).lower() for m in metrics_to_use] if metrics_to_use else []
+        use_rubric = "rubric" in metrics_lower
+
+        if use_rubric:
+            extra_metrics = [m for m in metrics_lower if m != "rubric"]
+            if extra_metrics:
+                print(
+                    f"⚠️ Detected rubric mode; ignoring other metrics: {extra_metrics}",
+                    flush=True,
+                )
+            eval_command = [
+                "python", "-u", "./eval_rule.py",
+                "--input_file", search_results_path,
+                "--output_file", eval_metrics_path,
+                "--max_workers", str(eval_params["max_workers"]),
+                "--dataset_name", dataset_name,
+            ]
+            append_arg(eval_command, "--evaluator_model", evaluator_model)
+            append_arg(eval_command, "--evaluator_base_url", evaluator_base_url)
+            append_arg(eval_command, "--evaluator_api_key", evaluator_api_key)
+            run_command(eval_command)
+        else:
+            eval_command = [
+                "python", "-u", "./evals.py",
+                "--input_file", search_results_path,
+                "--output_file", eval_metrics_path,
+                "--max_workers", str(eval_params["max_workers"]),
+                "--dataset_name", dataset_name,
+            ]
+            if metrics_to_use:
+                eval_command.extend(["--metrics", *metrics_to_use])
+            append_arg(eval_command, "--evaluator_model", evaluator_model)
+            append_arg(eval_command, "--evaluator_base_url", evaluator_base_url)
+            append_arg(eval_command, "--evaluator_api_key", evaluator_api_key)
+            run_command(eval_command)
         print("✅ Step 3 completed successfully.", flush=True)
     else:
         print("\n⏭️ Skipping Step 3: EVALUATE RESULTS.", flush=True)

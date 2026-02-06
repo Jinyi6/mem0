@@ -2,6 +2,7 @@
 import argparse
 import os
 import logging
+from pathlib import Path
 from datetime import datetime
 
 from src.utils import METHODS, TECHNIQUES
@@ -32,7 +33,12 @@ def main():
     parser.add_argument("--figure_view", action="store_true", default=False, help="Whether to include figure view in memory")
     parser.add_argument("--embedder_model", type=str, default="Pro/BAAI/bge-m3", help="Embedding model name for the embedder")
     parser.add_argument("--qdrant_path", type=str, default="./qdrant_data/tmp_msp", help="Path for the Qdrant vector store")
-    parser.add_argument("--dataset_name", type=str, default="locomo10_failed", help="Name of the dataset")
+    parser.add_argument(
+        "--dataset_name",
+        type=str,
+        default="locomo10_failed",
+        help="Dataset name or path (supports .json / .jsonl)",
+    )
     parser.add_argument("--workspace_dir", type=str, default=".", help="Directory for all experiment outputs including logs.")
     
     # Defaults for MSP Global Observer
@@ -133,11 +139,67 @@ def main():
     print("="*80)
     print(f"Running MSP Global Observer Experiment: {args.method}, Search Mode: {args.search_mode}")
 
+    def _convert_jsonl_to_json(src: Path, dst: Path) -> None:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with src.open("r", encoding="utf-8") as fin, dst.open("w", encoding="utf-8") as fout:
+            fout.write("[\n")
+            first = True
+            for line in fin:
+                line = line.strip()
+                if not line:
+                    continue
+                if not first:
+                    fout.write(",\n")
+                fout.write(line)
+                first = False
+            fout.write("\n]\n")
+
+    def _resolve_dataset_path(dataset_name: str) -> tuple[Path, str]:
+        script_dir = Path(__file__).resolve().parent
+        dataset_dir = script_dir / "dataset"
+
+        name_path = Path(dataset_name)
+        if name_path.suffix in {".json", ".jsonl"}:
+            if name_path.is_absolute() and name_path.exists():
+                resolved = name_path
+            elif name_path.exists():
+                resolved = name_path.resolve()
+            else:
+                candidate = dataset_dir / name_path.name
+                resolved = candidate if candidate.exists() else name_path
+        else:
+            json_path = dataset_dir / f"{dataset_name}.json"
+            jsonl_path = dataset_dir / f"{dataset_name}.jsonl"
+            if json_path.exists():
+                resolved = json_path
+            elif jsonl_path.exists():
+                resolved = jsonl_path
+            else:
+                candidate = dataset_dir / dataset_name
+                resolved = candidate if candidate.exists() else json_path
+
+        dataset_tag = resolved.stem
+        if resolved.suffix == ".jsonl":
+            converted = dataset_dir / f"{resolved.stem}__jsonl.json"
+            needs_convert = True
+            if converted.exists() and resolved.exists():
+                try:
+                    needs_convert = resolved.stat().st_mtime > converted.stat().st_mtime
+                except OSError:
+                    needs_convert = True
+            if needs_convert and resolved.exists():
+                print(f"🔄 Converting JSONL to JSON: {resolved} -> {converted}")
+                _convert_jsonl_to_json(resolved, converted)
+            resolved = converted
+        return resolved, dataset_tag
+
+    dataset_path, dataset_tag = _resolve_dataset_path(args.dataset_name)
+
     if args.technique_type == "mem0":
         # Force MSP Global modules
         if args.method == "add":
             memory_manager = MemoryADD(
-                data_path=f"./dataset/{args.dataset_name}.json", 
+                data_path=str(dataset_path),
                 batch_size=args.batch_size,
                 is_graph=args.is_graph, 
                 logger=logger,
@@ -158,7 +220,7 @@ def main():
         elif args.method == "search":
             output_file_path = os.path.join(
                 args.output_folder,
-                f"msp_{args.dataset_name}_results_top_{args.top_k}_mode_{args.search_mode}.json",
+                f"msp_{dataset_tag}_results_top_{args.top_k}_mode_{args.search_mode}.json",
             )
             os.makedirs(args.output_folder, exist_ok=True)
             
@@ -178,7 +240,7 @@ def main():
             )
             try:
                 memory_searcher.process_data_file(
-                    f"./dataset/{args.dataset_name}.json", max_workers=args.max_workers
+                    str(dataset_path), max_workers=args.max_workers
                 )
             finally:
                 if hasattr(memory_searcher, "close"):

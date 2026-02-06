@@ -128,12 +128,30 @@ def main():
 
     # --- Step 3: Evaluate Results ---
     print("\n" + "#"*25 + " STEP 3: EVALUATE RESULTS " + "#"*25)
-    eval_command = [
-        "python", "./evals.py",
-        "--input_file", search_results_path,
-        "--output_file", eval_metrics_path,
-        "--max_workers", str(config['eval_params']['max_workers'])
-    ]
+    eval_metrics = config.get("eval_params", {}).get("metrics")
+    metrics_lower = []
+    if isinstance(eval_metrics, list):
+        metrics_lower = [str(m).lower() for m in eval_metrics]
+    elif isinstance(eval_metrics, str) and eval_metrics.strip():
+        metrics_lower = [token.lower() for token in eval_metrics.split()]
+
+    use_rubric = "rubric" in metrics_lower
+    if use_rubric:
+        eval_command = [
+            "python", "./eval_rule.py",
+            "--input_file", search_results_path,
+            "--output_file", eval_metrics_path,
+            "--max_workers", str(config['eval_params']['max_workers'])
+        ]
+    else:
+        eval_command = [
+            "python", "./evals.py",
+            "--input_file", search_results_path,
+            "--output_file", eval_metrics_path,
+            "--max_workers", str(config['eval_params']['max_workers'])
+        ]
+        if metrics_lower:
+            eval_command.extend(["--metrics", *metrics_lower])
     run_command(eval_command)
     print("✅ Step 3 completed successfully.")
 
