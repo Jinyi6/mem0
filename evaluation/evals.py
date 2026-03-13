@@ -215,28 +215,38 @@ def _evaluate_candidates(
 
 def _parse_mcq_pred_answers(text: str) -> Tuple[Set[str], bool]:
     """
-    从文本中提取 MCQ 选项（只支持两种格式）：
-    - (A) / (b) ...
-    - [A] / [b] ...
+    从文本中提取 MCQ 选项（支持含有空格及选项内容的形式）：
+    - (A) / (b) / ( A ) / [ b ]
+    - ( A. He becomes more skeptical. ) / [ B: Some text ]
 
     返回: (options_set, malformed)
     - options_set: 提取到的选项字母集合（统一为大写），未提取到则为空集合
-    - malformed: 是否检测到不允许的紧邻形式，如 (A)(B) 或 [A][B]（直接判错）
+    - malformed: 是否检测到不允许的紧邻形式，如 (A)(B) 或 [ A ][ B ]（无分隔符，直接判错）
     """
     text = str(text).strip()
 
     # 额外支持：如果模型输出“有且只有字母”，且长度 < 6，则视为选项输出。
-    # 例如：A / ab / ABCD（会解析成对应字母集合，统一转大写）。
-    # 注意：这里只接受 A-F（与选择题选项范围一致）。
     if re.fullmatch(r"[A-Fa-f]{1,5}", text):
         return {ch.upper() for ch in text}, False
 
-    # 不允许紧邻形式："(A)(B)" 或 "[A][B]"（无分隔符）
-    if re.search(r"\([A-Fa-f]\)\([A-Fa-f]\)", text) or re.search(r"\[[A-Fa-f]\]\[[A-Fa-f]\]", text):
+    # 不允许紧邻形式：支持判定内部带有空格的情况，如 "( A )( B )" 或 "[A][ B ]"（无分隔符）
+    if re.search(r"\(\s*[A-Fa-f]\s*\)\(\s*[A-Fa-f]\s*\)", text) or \
+       re.search(r"\[\s*[A-Fa-f]\s*\]\[\s*[A-Fa-f]\s*\]", text):
         return set(), True
 
-    token_re = re.compile(r"\(([A-Fa-f])\)|\[([A-Fa-f])\]")
+    # 核心正则模式：
+    # \(\s*([A-Fa-f])               -> 匹配左括号、可选空格、提取字母A-F
+    # (?:\s+[^)]*|[^a-zA-Z)][^)]*)? -> 选项字母后如果还有内容，必须是空格开头，或者非英文字母开头（防止把 (Apple) 误判为 A）
+    # \)                            -> 匹配直到右括号
+    pattern = (
+        r"\(\s*([A-Fa-f])(?:\s+[^)]*|[^a-zA-Z)][^)]*)?\)"
+        r"|"
+        r"\[\s*([A-Fa-f])(?:\s+[^\]]*|[^a-zA-Z\]][^\]]*)?\]"
+    )
+    
+    token_re = re.compile(pattern)
     options: Set[str] = set()
+    
     for match in token_re.finditer(text):
         letter = match.group(1) or match.group(2)
         if letter:
@@ -248,13 +258,19 @@ def _parse_mcq_gt_answers(text: str) -> Set[str]:
     """
     解析 Ground Truth 的 MCQ 答案。
 
-    兼容两类输入：
+    兼容多类输入：
     - 裸字母: "A" / "c"
+    - 字母+文本: "D.He was..." 或 "D. He was..." (无论句号后有无空格)
     - 括号字母: "(A)" / "[c]"（会复用 pred 的解析规则，但忽略 malformed 标记）
     """
     raw = str(text).strip()
     if not raw:
         return set()
+
+    # 新增规则：只匹配开头的 A-F 字母和紧跟的英文句点
+    text_match = re.match(r"^([A-Fa-f])\.", raw)
+    if text_match:
+        return {text_match.group(1).upper()}
 
     # 纯字母（单选或多选：逗号/空格分隔），且不得包含其他字符
     if re.fullmatch(r"[A-Fa-f](?:[,\s]+[A-Fa-f])*", raw):
