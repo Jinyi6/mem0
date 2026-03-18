@@ -234,43 +234,57 @@ def _parse_mcq_pred_answers(text: str) -> Tuple[Set[str], bool]:
        re.search(r"\[\s*[A-Fa-f]\s*\]\[\s*[A-Fa-f]\s*\]", text):
         return set(), True
 
-    # 核心正则模式：
-    # \(\s*([A-Fa-f])               -> 匹配左括号、可选空格、提取字母A-F
-    # (?:\s+[^)]*|[^a-zA-Z)][^)]*)? -> 选项字母后如果还有内容，必须是空格开头，或者非英文字母开头（防止把 (Apple) 误判为 A）
-    # \)                            -> 匹配直到右括号
-    pattern = (
-        r"\(\s*([A-Fa-f])(?:\s+[^)]*|[^a-zA-Z)][^)]*)?\)"
-        r"|"
-        r"\[\s*([A-Fa-f])(?:\s+[^\]]*|[^a-zA-Z\]][^\]]*)?\]"
-    )
-    
-    token_re = re.compile(pattern)
     options: Set[str] = set()
-    
+
+    token_re = re.compile(r"\([^)]*\)|\[[^\]]*\]")
     for match in token_re.finditer(text):
-        letter = match.group(1) or match.group(2)
-        if letter:
-            options.add(letter.upper())
+        token = match.group(0)
+        inner = token[1:-1].strip()
+        if not inner:
+            continue
+
+        single_letter_match = re.fullmatch(r"([A-Fa-f])", inner)
+        if single_letter_match:
+            options.add(single_letter_match.group(1).upper())
+            continue
+
+        # 允许带 label 的完整选项文本，但要求 label 后有明确分隔符，
+        # 避免把 "(B-side version)" / "[C-suite leader]" 之类普通短语误判为选项。
+        labeled_text_match = re.match(r"^([A-Fa-f])\s*[.:]\s*.+$", inner)
+        if labeled_text_match:
+            options.add(labeled_text_match.group(1).upper())
+            continue
+
+        # 对很短的括号内容做一个保守兜底：若内容只含字母/空格且总字母数 <= 5，
+        # 且首字母是 A-F，则按首字母解析。
+        letters_only = re.sub(r"[^A-Za-z]", "", inner)
+        if (
+            letters_only
+            and len(letters_only) <= 5
+            and inner[0].upper() in {"A", "B", "C", "D", "E", "F"}
+            and re.fullmatch(r"[A-Za-z ]+", inner)
+        ):
+            options.add(inner[0].upper())
 
     return options, False
 
-def _parse_mcq_gt_answers(text: str) -> Set[str]:
+def _parse_mcq_gt_answers(text: str, *, allow_prefixed_option_text: bool = False) -> Set[str]:
     """
     解析 Ground Truth 的 MCQ 答案。
 
     兼容多类输入：
     - 裸字母: "A" / "c"
-    - 字母+文本: "D.He was..." 或 "D. He was..." (无论句号后有无空格)
+    - 字母+文本: "D.He was..." 或 "D. He was..." (仅在 allow_prefixed_option_text=True 时启用)
     - 括号字母: "(A)" / "[c]"（会复用 pred 的解析规则，但忽略 malformed 标记）
     """
     raw = str(text).strip()
     if not raw:
         return set()
 
-    # 新增规则：只匹配开头的 A-F 字母和紧跟的英文句点
-    text_match = re.match(r"^([A-Fa-f])\.", raw)
-    if text_match:
-        return {text_match.group(1).upper()}
+    if allow_prefixed_option_text:
+        text_match = re.match(r"^([A-Fa-f])\.", raw)
+        if text_match:
+            return {text_match.group(1).upper()}
 
     # 纯字母（单选或多选：逗号/空格分隔），且不得包含其他字符
     if re.fullmatch(r"[A-Fa-f](?:[,\s]+[A-Fa-f])*", raw):
@@ -278,21 +292,6 @@ def _parse_mcq_gt_answers(text: str) -> Set[str]:
 
     extracted, _malformed = _parse_mcq_pred_answers(raw)
     return extracted
-
-def _is_likely_mcq_gt(candidates: List[str]) -> bool:
-    """
-    判断 Ground Truth 是否看起来像选择题答案。
-    """
-    if not candidates:
-        return False
-    # 检查所有候选答案能否被解析为选项集合，并且不为空
-    valid = True
-    for c in candidates:
-        extracted = _parse_mcq_gt_answers(str(c))
-        if not extracted:
-            valid = False
-            break
-    return valid
 
 def print_metrics_summary(results_dict: Dict[str, List[Dict]], output_path: str):
     """
@@ -404,7 +403,7 @@ def process_single_item(
         matched_candidate = ""
         if not pred_malformed:
             for cand in answer_candidates:
-                gt_options = _parse_mcq_gt_answers(str(cand))
+                gt_options = _parse_mcq_gt_answers(str(cand), allow_prefixed_option_text=True)
                 if not gt_options:
                     continue
                 if pred_options == gt_options:
